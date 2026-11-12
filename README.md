@@ -4,9 +4,9 @@ This kit builds the Vita port of Bloodborne PSX **from your own copy of the game
 hand-written settings only: **no Bloodborne PSX art, models, maps, music or voices are included**. The data you build from them is derived
 from the game's files, so keep it for your own use unless you have permission to share it.
 
-> **Status: honest warning.** The game source was written and checked on a PC; everything here was only ever compiled and run by the author on one Vita.
-> `pack_icons.py`, `pack_rgba.py` and `make_dlgfont.py` have **not** been tested by anyone. The included `CMakeLists.txt` is the author's own working file.
-> The hunter.bin build is documented in the header of `tools/convert_hunter.py`; the weapon / pistol / tint options of the author's own run are not recorded, so expect some trial and error there.
+> **Status: honest warning.** The game source was written and checked on a PC; everything here was only ever compiled and run by the me on my Vita.
+> `pack_icons.py`, `pack_rgba.py` and `make_dlgfont.py` have **not** been tested by anyone. The included `CMakeLists.txt` is my own working file.
+> The hunter.bin build is documented in the header of `tools/convert_hunter.py`; the weapon / pistol / tint options of my own last run are not tested from this kit, so expect some trial and error there.
 
 ## Quick start (short version)
 
