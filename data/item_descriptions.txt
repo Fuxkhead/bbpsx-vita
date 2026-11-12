@@ -1,0 +1,112 @@
+ITEM DESCRIPTIONS FOR PROOFREADING
+=================================
+
+For each item: WIKI = the Bloodborne wiki text (verbatim where I found it). GAME = the text I would put in the inventory.
+The in-game menu font only has capital letters and digits, so there is no punctuation and apostrophes are dropped.
+Each line break below is a line break in the game. Edit anything and send it back.
+Sources: fextralife and fandom Bloodborne wikis. Blood Rock (upgrade material) and the keys have no wiki text yet.
+
+BLOOD VIAL
+  WIKI: Special blood used in ministration. Restores HP. / Once a patient has had their blood ministered, a unique but common treatment in Yharnam, successive infusions recall the first, and are all the more invigorating for it. / No surprise that most Yharnamites are heavy users of blood.
+  GAME: SPECIAL BLOOD USED IN MINISTRATION  RESTORES HP
+        ALWAYS EQUIPPED  TRIANGLE DRINKS ONE
+
+QUICKSILVER BULLETS
+  WIKI: Special bullets used with hunter firearms. / Ordinary bullets have no effect on beasts, and so Quicksilver Bullets, fused with the wielder's own blood, must be employed. / The strength of Quicksilver Bullets depends greatly upon the wielder's bloodtinge.
+  GAME: SPECIAL BULLETS USED WITH HUNTER FIREARMS
+        THEIR STRENGTH DEPENDS ON YOUR BLOODTINGE  FIRE WITH L1  ALWAYS EQUIPPED
+
+ANTIDOTE
+  WIKI: Small medicinal tablets that counteract poison. / Used to treat ashen blood, the baffling sickness that ravaged Old Yharnam long ago. / These tablets only provide short-term relief. / The ashen blood ailment eventually triggered the spread of the beastly scourge.
+  GAME: SMALL MEDICINAL TABLETS THAT COUNTERACT POISON
+        USE IT FROM A QUICK SLOT
+
+SEDATIVE
+  WIKI: Liquid medicine concocted at Byrgenwerth. Calms the nerves. / Those who delve into the arcane fall all-too-easily to madness, and thick human blood serves to calm the frayed nerves / Naturally, this often leads to a reliance on blood ministration.
+  GAME: LIQUID MEDICINE CONCOCTED AT BYRGENWERTH  CALMS THE NERVES
+        FRENZY BUILDS AT A FIFTH OF THE RATE FOR 45 SECONDS  USE IT FROM A QUICK SLOT
+
+PEBBLE
+  WIKI: Small pebbles found throughout Yharnam. Can be thrown at foes. Quite thrilling.
+  GAME: SMALL PEBBLES FOUND THROUGHOUT YHARNAM  CAN BE THROWN AT FOES
+        QUITE THRILLING  LURES CREATURES TO WHERE IT LANDS
+
+MOLOTOV COCKTAIL
+  WIKI: Explodes in raging flames when thrown against an object. One of the oldest hunter tools available in the workshop. / Since the tragedy that struck Old Yharnam, fire has become a staple in beast hunts, and is thought to cleanse impurity. / Certain types of beasts have an abnormal fear of flame.
+  GAME: EXPLODES IN RAGING FLAMES WHEN THROWN AGAINST AN OBJECT
+        LEAVES A BURNING PATCH  BREAKS BARRELS  SCALES WITH ARCANE
+
+THROWING KNIFE
+  WIKI: Throwing knife with a finely serrated blade. / One of the old hunter Henryk's favorite weapons. / Does not cause a great deal of damage to beasts, but with deft use, can distract attackers and keep them at bay.
+  GAME: THROWING KNIFE WITH A FINELY SERRATED BLADE  ONE OF HENRYKS FAVORITES
+        DISTRACTS ATTACKERS  12 DAMAGE  USE IT FROM A QUICK SLOT
+
+FIRE PAPER
+  WIKI: Coarse paper that applies fire to weapons when rubbed. A hunter tool found in the Healing Church workshop. / Since the tragedy that struck Old Yharnam, fire has become a staple in beast hunts, and is thought to cleanse impurity. / Certain types of beasts have an abnormal fear of flame.
+  GAME: COARSE PAPER THAT APPLIES FIRE TO WEAPONS WHEN RUBBED
+        LASTS 90 SECONDS  NOT FOR THE TONITRUS
+
+BOLT PAPER
+  WIKI: Coarse paper that applies bolt to weapons when rubbed. Invented by Archibald, the infamous eccentric of the Healing Church...
+  GAME: COARSE PAPER THAT APPLIES BOLT TO WEAPONS WHEN RUBBED
+        LASTS 90 SECONDS  NOT FOR THE TONITRUS
+
+BLOOD STONE SHARD
+  WIKI: A solid shard that forms in coldblood. / After death, a substance in the blood hardens, and that which does not crystallize is called a blood stone. / At the workshop, these bloodstones are embedded in weapons to fortify them.
+  GAME: A SOLID SHARD THAT FORMS IN COLDBLOOD
+        EMBEDDED IN WEAPONS AT THE WORKSHOP TO FORTIFY THEM
+
+TWIN BLOOD STONE SHARDS
+  WIKI: (same text as the Blood Stone Shard on the wiki)
+  GAME: TWO SOLID SHARDS THAT FORM IN COLDBLOOD
+        EMBEDDED IN WEAPONS AT THE WORKSHOP TO FORTIFY THEM
+
+BLOOD STONE CHUNK
+  WIKI: A solid shard that forms in coldblood. / After death, some substances crystallise, but most simply harden and form blood stones. / At the workshop, these blood stones are embedded in weapons to fortify them.
+  GAME: A LARGE PIECE OF BLOOD STONE  EMBEDDED IN WEAPONS AT THE WORKSHOP
+        OFFER IT AT THE DREAMS LANTERN TO BRING THE FALLEN BOSSES BACK
+
+COLDBLOOD DEW 1 / 2 / 3
+  WIKI: Droplet of coldblood containing Blood Echoes. Use to gain Blood Echoes. / Hunters sustained by the dream gain strength from Blood Echoes. They imbibe the blood with thoughts of reverence, indeed gratitude, for their victims.
+  GAME: DROPLET OF COLDBLOOD CONTAINING BLOOD ECHOES  USE TO GAIN BLOOD ECHOES
+        GIVES 500 / 1000 / 2000 ECHOES  USE IT FROM A QUICK SLOT   [the number changes with the dew]
+
+THICK COLDBLOOD 5 / 6
+  WIKI: Can be consumed to acquire a large amount of Blood Echoes. (only a one-line summary found, no lore text)
+  GAME: THICK COLDBLOOD  CAN BE CONSUMED TO ACQUIRE A LARGE AMOUNT OF BLOOD ECHOES
+        GIVES 5000 / 10000 ECHOES  USE IT FROM A QUICK SLOT   [the number changes with the item]
+
+BLACKSKY EYE
+  WIKI: Soft eye blessed by a phantasm. They were discovered through Byrgenwerth's contact with the arcane, but in the end revealed nothing. / Deep within the eye lies a vast stretch of dark sky that rumbles with an endless meteor storm. / The slightest rub of the tiny orb, and the rock will tumble and soar.
+  GAME: SOFT EYE BLESSED BY A PHANTASM  RUB THE ORB AND THE ROCK WILL TUMBLE AND SOAR
+        COSTS ONE QUICKSILVER BULLET  NO STAMINA  NEEDS 16 ARCANE  SCALES WITH ARCANE
+
+MUSIC BOX
+  WIKI: A small music box received from a young Yharnam girl. / Plays a song shared by her mother and father. / Inside the lid is a small scrap of paper, perhaps an old message. / Two names can be made out, however faintly, Viola and Gascoigne.
+  GAME: A SMALL MUSIC BOX RECEIVED FROM A YOUNG YHARNAM GIRL  TWO NAMES CAN BE MADE OUT
+        PLAY IT AT THE BEAST GASCOIGNE IN HIS SECOND PHASE  ONCE PER FIGHT
+
+MONOCULAR
+  WIKI: Monocular used to View things up close. / Not a hunter's tool, but a simple antique, to be used as one sees fit.
+  GAME: MONOCULAR USED TO VIEW THINGS UP CLOSE  NOT A HUNTERS TOOL BUT A SIMPLE ANTIQUE
+        USE IT FROM A QUICK SLOT FOR A FIRST PERSON SHOOTING VIEW
+
+CROW HUNTER BADGE
+  WIKI: Badge of a hunter of hunters. who hunts those who have become addled with blood. / The badge of the hunter of hunters is quietly passed down from generation to generation, usually to an outsider from the hinterlands. / To be entrusted with this cursed badge, one must be strong, resilient to the seduction of blood, and gracious when taking a comrade's life.
+  GAME: BADGE OF A HUNTER OF HUNTERS  WHO HUNTS THOSE ADDLED WITH BLOOD
+        OPENS THE INSIGHT SHOP TO THE BLADES OF MERCY AND EILEENS CLOTHES
+
+HUNTER'S MARK
+  WIKI: A dangling, upside-down rune etched in one's mind. The mark of a hunter. Clears all your Blood Echoes and returns you to the Hunter's Dream, as if awaking afresh from a bad dream. (summary of the wiki, not a verbatim quote)
+  GAME: A DANGLING UPSIDE DOWN RUNE ETCHED IN ONES MIND  THE MARK OF A HUNTER
+        USE IT FROM A QUICK SLOT  CLEARS YOUR BLOOD ECHOES AND WAKES YOU IN THE HUNTERS DREAM
+
+RED JEWELED BROOCH
+  WIKI: A woman's bright-red brooch, engraved with the name Viola. (the original can be consumed for a blood gem; the port has no such use)
+  GAME: A WOMANS BRIGHT RED BROOCH ENGRAVED WITH THE NAME VIOLA
+        A KEEPSAKE  NO USE YET
+
+KEYS: GILBS KEY (1ST AND 2ND FLOOR), 1ST FLOOR CLINIC KEY, BASEMENT KEY, SEWER KEY
+  WIKI: (not looked up: these are this port's own names, not all of them exist in Bloodborne)
+  GAME: A KEY
+        WALK UP TO ITS DOOR AND PRESS X TO UNLOCK IT   [the same line for every key today; I can write one per key if you tell me what each opens]

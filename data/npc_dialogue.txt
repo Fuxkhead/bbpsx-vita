@@ -1,0 +1,348 @@
+
+=== BP/General/BP_MessengerAttire.uexp
+  [02A2F96C] Lend Attire
+  [EC660F2A] The messengers want to know your opinion.
+  [DF903E04] This is a fine look
+  [AEFB4BD1] This is a foul look
+  [E2EDEDBF] (E)
+  [3A9B07BF] Leave Unadorned
+  [13DC3A0C] Leave
+  [02A2F96C] Lend Attire
+  [D8F37957] Can't lend current attire!
+  [5E57DDBA] Already lent!
+
+=== BP/General/BP_Store.uexp
+  [E9399BEB] Blood Echo Store
+  [997033B6] Purchase Items
+  [5550E640] Leave
+
+=== BP/General/BP_WeaponWorkshop.uexp
+  [0381F303] Leave
+  [C2E9A325] Weapon transformations unlocked!
+  [0A9AB2C3] Continue
+  [FEF3AE22] Repair Tonitrus
+  [CC92FCAF] Unlock Transforms
+  [56D3ED97] Continue
+  [FFD36C61] Blood stone requirement not met!
+  [92700758] upgraded to
+  [86C1A866] Confirm
+  [36325E1C] Weapon Workshop
+  [A2199911] L Weap Max Lvl
+  [B5C5C078] Upgrade L Weapon
+  [0FA18C4B] R Weap Max Lvl
+  [5576F98E] Upgrade R Weapon
+  [56D0594F] Upgrade
+  [98E0013A] to
+  [434AE451] ?
+  [3FF0A9D4] 1
+  [18884698] 1
+  [A4DC46EB] -
+  [0895A462] -
+  [34A03C43] -
+  [4A41C7CE] 2
+  [D2668CD6] 1/1.4s
+  [F6FA886F] -
+  [560B4309] In the pause menu, press L1 to transform your R weapon!
+
+=== Char/Bosses/ClericBeast/BPC_ClericBeast.uexp
+  [D4CE2FA1] PREY SLAUGHTERED
+
+=== Char/Bosses/Gascoigne/BPC_Gascoigne.uexp
+  [B0344B80] Too proud to show your true face, eh?
+  [B98F584D] PREY SLAUGHTERED
+  [2FB53B9B] ...What's that smell?
+  [9185E560] But a sporting hunt, it was.
+  [251BF384] The sweet blood, oh, it sings to me.
+  [56E2B285] It's enough to make a man sick...
+  [C7F7195A] Ha ha ha ha ha ha ha...
+
+=== Char/Bosses/Gilb/BPC_Gilb.uexp
+  [901F70B7] PREY SLAUGHTERED
+
+=== Char/Bosses/WL/BPC_WL.uexp
+  [FFAB76A5] PREY SLAUGHTERED
+
+=== Char/NPCs/Doll/BP_Doll.uexp
+  [B5556958] Very well.
+  [C541C3DA] The Hunters Dream
+  [2C5207EA] What is it you desire?
+  [83A18A4B] Channel Echoes
+  [F68D335C] Talk
+  [A4C52808] Save
+  [1E5D0EE0] Leave
+  [1783F31F] Hunters have told me about the church.
+  [FFE17852] Ahh, the little ones, inhabitants of the dream...
+  [60D8FD75] Did you speak with Gehrman?
+  [03A7D327] Farewell, good hunter.
+  [83F8E5A7] Welcome home, good hunter.
+  [A28E6435] What is it you desire?
+  [211ADBC2] Let the echoes become your strength.
+  [EFF36571] Let me stand close.
+  [CF245A21] Now shut your eyes.
+  [3CF45B38] May you find your worth in the waking world.
+  [70C06AAE] Hello, good hunter.
+  [FA08DC51] I am a doll, here in this dream to look after you.
+  [E946C39A] Honourable hunter, pursue the echoes of blood,
+  [82B5EBC5] and I will channel them into your strength.
+  [9FAB7047] You will hunt beasts... and I will be here for you,
+  [6B7536E2] to embolden your sickly spirit.
+  [94526F24] Such is his purpose.
+  [B6475296] Still, he stays here, in this dream.
+  [412C3C9E] He is obscure, unseen in the dreaming world.
+  [30250B49] But now serves only to advise them.
+  [9C374AF4] He was a hunter long, long ago.
+  [D14A9159] Speak words, they do not, but still, aren't they sweet?
+  [718740CE] They find hunters like yourself, worship, and serve them.
+  [11579A36] Isn't that is how you've made me?
+  [13E4A46F] I do love you.
+  [88BE9416] Of course...
+  [A8F14F17] Would you ever think to love me?
+  [111293B0] I am a doll, created by you humans.
+  [E8EA56B9] But... do the gods love their creations?
+  [A092CC88] About the gods, and their love.
+
+=== Char/NPCs/Gehrman/BPC_Gehrman.uexp
+  [B8CD6FF6] Welcome to the Hunter's Dream. This will be your home, for now,
+  [E62D6D73] Ah-hah, you must be the new hunter.
+  [9FCE29CC] I am...
+  [1374DF77] ...
+  [AF788267] Gehrman, friend to you hunters.
+  [276DBC43] You're sure to be in a fine haze about now, but don't think too hard about all of this.
+  [40792A4E] Just go out and kill a few beasts. It's for your own good.
+  [2DBB5B15] You know, it's just what hunters do! You'll get used to it...
+  [FC23C33B] This was once a safe haven for hunters.
+  [5C5F6341] A workshop where hunters used blood to enhance their weapons and flesh.
+  [D2F794DA] We don't have as many tools as we once did, but...
+  [50F28770] You're welcome to use whatever you find.
+  [40DC5EE8] ...Even the doll, should it please you...
+  [A756034A] ...
+
+=== Char/NPCs/Messenger/BP_MessengerWeapGrant.uexp
+  [E5B20BA2] OK
+  [4A068EA8] The messengers offer you a trick weapon. Choose one. Trick weapons are wielded with the right hand, and employed in beast hunting.
+  [99CE7B05] The messengers off you a firearm. Choose one. Firearms are weilded with the left hand, and employed in beast hunting.
+  [DF9F73C9] Back
+
+=== Char/NPCs/Messenger/BP_NoteMessenger.uexp
+  [CB453124] OK
+
+=== Maps/CentralYharnam/MP_CY_FountainPlaza.uexp
+  [59F782C0] Don't leave me alone...
+  [A66D3579] ...Mummy... mummy...
+  [F6555C2D] ...Was it really her?
+  [08B82A7A] My mum wears a red jeweled brooch.
+  [6180E9E8] Since you are helping find my mum, may I ask your name?
+  [48720632] No response.
+  [25725027] OK
+  [42B6ADCC] I don't reckon you're from 'round here!
+  [255BF147] Well, pffft, stuck outside on a night of the hunt!
+  [5E0ED89F] Ahh, you poor, poor thing...
+  [906D2BCB] Hahahahaha.....
+  [B7B11800] No response.
+  [25725027] OK
+  [754AE502] No response. The resident appears to be hiding.
+  [25725027] OK
+  [DCF09A34] Oh, hello kind hunter.
+  [B50661A5] Are you that hunter?
+  [31F2D48A] Who... are you?
+  [AA7E8BC9] Are you a hunter?
+  [43E0CB2D] Then, please, will you look for my mum?
+  [0A56BC4F] What is your answer?
+  [BE53DF9C] Find Girl's Mother
+  [40A9533D] Refuse
+  [BD34BDE4] Really? Oh, thank you!
+  [D0D71AB0] Oh, alright...
+  [DEE8EACE] Thanks for chatting.
+  [6AF67A3A] Take care, on your hunt.
+  [A8994C3B] Can you look for my mum?
+  [FB008DFB] My m-mum wears a red jeweled brooch.
+  [CB6ADE0A] If you find my mum, give her this music box.
+  [4AEA9FFA] And when daddy forgets us we play it for him so he remembers.
+  [C377D71C] Oh, and if you find her, give her that music box I gave you.
+  [B5BA9939] Please, I know you can do it.
+  [420CAB89] Still can't find my mum?
+  [AF29E90D] Give Red Jeweled Brooch?
+  [1D0033A2] Give
+  [490ED259] Do Not Give
+  [0456CB1F] Yes, okay. I can wait.
+  [97A1AAD2] Mum knows I'm very brave, and you're very kind.
+  [478B3BE7] I won't be afraid, I'll be a good girl, I promise.
+  [5EAEF983] ...
+  [70A6669C] Well,
+  [D9C863B1] good luck on your hunt!
+
+=== Maps/CentralYharnam/MP_CY_Gilbert.uexp
+  [9CCEE879] Central Yharnam
+  [BF3B2691] But before I... Take this...
+  [6FDBCE96] I can even die human...
+  [F3AF2644] I was most fortunate. Unharmed by the plague of beasts
+  [81B9B370] Their strange blood bought me time.
+  [F312C8AF] What afflicted me was incurable, but this town gave me hope...
+  [9F2E9965] I'm afraid I'm of little help now.
+  [3C66B3BD] Ahh, you needn't concern yourself with me.
+  [00A88F3D] Oh, you must be a hunter.
+  [6F9F12E6] No response.
+  [C5311CCF] OK
+  [BD54079F] The sewers lead from the town south of the Great Bridge to the Cathedral Ward.
+  [89B42E12] Across the valley to the East of Yharnam lies the town of the Healing Church, known as the Cathedral Ward.
+  [428BE643] Paleblood, you say?
+  [BBB327D1] This town is cursed.
+  [9CB60F93] And... not one from around here, either.
+  [762287FD] I'm Gilbert. A fellow outsider.
+  [C4518A5D] You must have had a fine time of it. Yharnam has... a special way of treating guests.
+  [CB819143] Well, I don't think I could stand if I wanted to...
+  [97687FC2] But I'm willing to help, if there's anything that can be done.
+  [7A3E6B8C] Whatever your reasons might be, you should plan a swift exit.
+  [CCAF894B] Whatever can be gained from this place, it will do more harm than good...
+  [7DA589D2] Hmm... Never heard of it.
+  [03B36425] But if it's blood you're interested in, you should try the Healing Church.
+  [7058826C] The church contains all knowledge on blood ministration, and all varieties of blood.
+  [57C12988] And deep within the Cathedral Ward is the old grand cathedral.
+  [6A358491] ...the birthplace of the Healing Church's special blood, or so they say.
+  [61D47075] Yharnamites don't share much with outsiders.
+  [86024050] Normally, they wouldn't let you near the place, but...
+  [8F35E919] The hunt is on tonight. This might be your chance...
+  [10A957D3] I made no use of it, but perhaps you...
+  [FC0BD285] You could try the sewers.
+  [122CD6C8] From there the sewers lead to the Cathedral Ward.
+  [639D4AA6] Not much of a choice with the bridge closed.
+
+=== Maps/CentralYharnam/MP_CY_RabidDogAlley.uexp
+  [923935F9] No response. The resident appears to be dead.
+
+=== Maps/CentralYharnam/MP_CY_SewerShortcut.uexp
+  [F15CFEB6] Wretched outsider!
+  [56FE6730] Tryin' to fool me to open this door?
+  [8F1A8544] Heavens, the depths of depravity...
+
+=== Maps/CentralYharnam/MP_ClericBeastArena.uexp
+  [955094EB] The gates to the Cathedral Ward are shut tight.
+
+=== Maps/CentralYharnam/MP_GascoigneArena.uexp
+  [4657BF91] Heh heh heh...
+  [44CDA162] Few hunters can resist the intoxication of the hunt.
+  [4657BF91] Heh heh heh...
+  [812167C0] Your blood is mine!
+  [2D38039D] A hunter's blood for me!
+  [D910B302] Enough of this terrible dream!
+  [2C768BD6] Heh heh heh...
+  [64A2A5F3] Look at you.
+  [30BE70EF] Heh heh heh...
+  [DB9F022F] You can't go on like this...
+  [1E91554E] ...You'll be one of them, sooner or later...
+  [FD908CFD] ...Beasts all over the shop...
+  [392E6F62] The night grows deep.
+  [534B4888] Continue
+  [63FA1574] All hunters must die...
+  [8ABF5ACA] What good are hunters now?
+  [DEDB4648] Try to keep your hands clean.
+  [336571F8] *Gasp* *Gasp*
+  [7CE8B8A3] That wasn't necessary of you...
+  [8A03720B] But you have my thanks.
+  [5D8600D9] We made it, with our lives. You're not bad at all.
+  [023D5C91] You must've killed Gascoigne as well, then?
+  [395FD4CB] ...
+  [075203E7] He was falling apart, I'm sure it had to be done.
+  [3FDA4DBF] But try to keep your hands clean.
+  [608F1EAF] A hunter should hunt beasts.
+  [9586D60F] Leave the hunting of hunters to me...
+  [746D0A43] Heh heh...
+  [47F84E49] Leave the hunting of hunters to me.
+  [2C9C7592] Heh heh...
+  [D7707B79] Look at you, just the same as all the rest...
+  [7CA15174] Only I can stop this madness!
+  [9425751A] The hunters must die... The nightmare must end...
+  [F5084FEE] You're no different.
+  [30BE70EF] Heh heh heh...
+  [534B4888] Continue
+  [AD07CC47] The gates to the Cathedral Ward are shut tight.
+
+=== Maps/DerelictEstate/MP_DE_Basement.uexp
+  [2E2A0408] What happened here?
+
+=== Maps/DerelictEstate/MP_DE_FirstFloor.uexp
+  [73B630AD] Return to the Hunters Dream. Are you sure?
+  [4842F76D] Blood Vial
+  [7CC28603] uh
+  [2F49E8C8] No
+
+=== Maps/HuntersDream/MP_HuntersDream.uexp
+  [3C15193E] Hunter's Dream
+  [F040DF2C] Hunter's Dream
+  [D7AABB5F] Hunter's Dream
+  [F040DF2C] Hunter's Dream
+  [62C7939F] An abandoned doll.
+
+=== Maps/IosefkasClinic/MP_IC_FirstFloorSickroom.uexp
+  [EA92CC4B] Whatever happens... You may think it all a mere bad dream...
+  [92D08415] Now, let's begin the transfusion. Oh, don't you worry.
+  [9BC980E7] <img id="PSStart"></> then<img id="PSDPadU"></>: Equip consumables
+<img id="PSTriangle"></>: Use consumable
+  [FF4F62E8] <img id="PSStart"></> then<img id="PSDPadU"></>: Equip consumables <red>(PLAYER 1 ONLY)</>
+<img id="PSTriangle"></>: Use consumable
+  [2529A771] Ahh, you've found yourself a hunter...
+  [687D978D] Good. All signed and sealed.
+
+=== Maps/YharnamSewers/MP_YS_DryDock.uexp
+  [4E966960] Look at you, you sorry drunk.
+  [6F5CF8A9] I'll string you up like the filthy beast you are.
+  [27556B8C] ...Tell the doll I said hello...
+  [02E73935] You still have dreams?
+  [DF3DDCA4] Oh, a hunter, are ya? And an outsider?
+  [4CFB4E51] You can't go on like this...
+  [E9FB2658] What are you still doing here?
+  [E088349E] Still lingering about?
+  [8B267A8E] What a mess you've been caught up in. And tonight, of all nights.
+  [31AF4589] Here, to welcome the new hunter.
+  [2E1AD543] Prepare yourself for the worst.
+  [B8B2B12A] There are no humans left. They're all flesh-hungry beasts, now.
+  [A3C3D7A2] What's wrong? A hunter, unnerved by a few beasts?
+  [EF609906] Heh heh...
+  [ED4FFD21] No matter. Without fear in our hearts, we're little different from the beasts themselves.
+  [FB779BA2] Enough trembling in your boots.
+  [9D8404DC] A hunter must hunt.
+
+=== UI/HUD/W_Store.uexp
+  [EC257BC6] Saw Cleaver
+  [0761A8CE] Threaded Cane
+  [9567665E] Hunter Blunderbuss
+  [D6622E9F] Hunter Pistol
+  [CE63BE07] Blades Of Mercy
+  [969F9E11] Confirm.
+  [DB28AE80] Confirm purchase.
+  [E3369660] Select amt to buy.
+  [6ACE1153] Select quantity to buy.
+  [116E8074] Owned
+  [116E8074] Owned
+  [6ACE1153] Select quantity to buy.
+  [E3369660] Select amt to buy.
+  [6ACE1153] Select quantity to buy.
+  [1CF84D7C] Insight
+  [98C896E6] Echoes
+  [5EB65A61] 1
+  [4DF8F7E5] 1
+  [98216099] -
+  [98216099] -
+  [98216099] -
+  [6CDB5735] Owned:
+  [1CF84D7C] Insight
+  [B0C769B6] Echoes
+  [98216099] -
+  [1CF84D7C] Insight
+  [E57D75CD] Echoes
+  [1CF84D7C] Insight
+  [E57D75CD] Echoes
+
+=== UI/LevelUp/W_LevelUp.uexp
+  [3173DC48] Confirm
+  [C2782DB3] Lvl
+  [34E087D3] Confirm
+  [AD4065DC] Conf.
+  [838D6A5F] Spend
+  [741F920B] Blood Echoes and level up?
+  [645B71A1] Lvl
+  [36154D2E] Lvl
+  [34629640] Adv.
+
+=== UI/LevelUp/W_WeaponStats.uexp
+  [5E81F33D] Bld Stone Requirement

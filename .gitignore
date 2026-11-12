@@ -1,0 +1,19 @@
+# never commit game data or build output
+build/
+assets/
+*.bin
+*.vpk
+*.self
+*.wav
+*.png
+*.pak
+*.psk
+*.pskx
+*.psa
+*.usda
+snd/
+snd_out/
+convert_logs/
+save.bin
+log_on.txt
+maplog*.txt

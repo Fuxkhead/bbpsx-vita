@@ -1,0 +1,12 @@
+ic_firstfloorsickroom
+firstfloorsickroom
+ge_parta
+ge_partb
+ge_bossarena
+de_basement
+de_operatingroom
+huntersworkshop
+junction
+deepsewers
+poisonchannel
+upperchannel

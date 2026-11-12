@@ -1,0 +1,1666 @@
+H BLOODBORNE PSX
+
+T A Demake by
+N Lilith Walther
+
+T Music & Audio
+N Evelyn Lark
+
+T Additional Art
+N Corwyn Prichard
+
+T Beast Gilbert VO
+N Wes Wiggins
+
+T Packs / Resources
+N PSXFX (Vertex Lighting)
+N Animated CRT TV - VCR Effects
+N Jazz Mickle (PSX Dithering)
+N Freesound
+
+T Special Thanks
+N Rigel McDonald
+N Alex Huard
+N Aidan Cushing
+N Haunted PS1
+
+H PS VITA PORT
+
+T Rebuilt by
+N FuxkHead
+
+P Bloodborne PSX is a fan project based off of the PS4 video game Bloodborne, which was created by:
+
+T Director
+N Hidetaka Miyazaki
+T Lead Programmer
+N Jun Ito
+T Programmers
+N Keisuke Ooi, Yuki Kido, Masaaki Sakamoto, Takuya
+N Harada, Takahiro Sugaya, SangHun Kim, Kazuaki Ito,
+N Kyouichi Murata, Kenji Uchida, Jun Manabe (SOFPRO
+N Co. Ltd.), Daisuke Sato (RHINO STUDIOS INC.), Takuya
+N Nishizawa (E-SMILE. CO.LTD), Akito Muramatsu (CREEK
+N & RIVER Co. Ltd.), Akira Watanabe, Takeshi Suzuki,
+N Naoki Tanaka, Keita Shibahara, Tomotaka Nakamura,
+N Shun Okabe, Katsuhiko Sato, Daisuke Shibano, Hiroki
+N Sakai, Keiji Sakaguchi (E-SMILE. CO.LTD), Makoto
+N Hasegawa, Seiji Goto, Kosuke Namiki, Shunta
+N Magaribuchi, Satoru Kubota (CREEK & RIVER Co. Ltd.),
+N Takasuke Andou, Hiroshi Takada, Yu Kajii, Hironori
+N Sakaguchi, Toshimitsu Koyachi, Kento Masuno,
+N Jianxiong Hu, Motohiro Tsuzuki, Yosuke Ono, Yuki
+N Tsutsumi, Hidetoshi Ishiyama, Hiro Tsuro, Tomonari
+N Kuramochi, Koichirou Takita, Tetsuya Yamamoto,
+N Takehiro Kakizawa, Isao Wada, Heeseong Nan, Toru
+N Nakamura, Katsuhiko Sato, Kohei Yamamoto, Ryuichi
+N Kiriyama, Hideaki Azuma
+T Lead Game Designer
+N Kazuhiro Hamatani
+T Game Designers
+N Kaiko Arima, Junya Ishizaki, Takeyuki Kitazaki,
+N Masaru Yamamura, Yoshitaka Osawa, Ryo Makita,
+N Hiroaki Ishige, Yusaku Sanami, Yuki Fukuda, Yuya
+N Kimijima, Hiroshi Yoshida, Hidenori Yuki, Kiyotaka
+N Satoh, Yuki Izumi, Kenichi Sato, Kosuke Ide, Ryosuke
+N Fukuda, Haruki Murai, Sho Igarashi, Yukako Abe,
+N Isamu Okano, Naoyuki Takahashi
+T System Designers
+N Ryu Matsumoto, Naoto Saigusa, Kazutoshi Nakajima,
+N Tomoaki Takesue, Shinichiro Nishida, Takahiro Doi,
+N Tomoki Otsuka
+T Testers
+N Dai Sato, Keisuke Kudo (DIGITAL Hearts Co. Ltd.),
+N Akihiro Yamaguchi (DIGITAL Hearts Co. Ltd.), Daisuke
+N Sato (DIGITAL Hearts Co. Ltd.)
+T Lead Map Artists
+N Makoto Satoh, Nozomi Shiba, Hisao Yamada, Yoichi
+N Akizuki
+T Map Artists
+N Naomi Maehara, Ryota Iwai, Takafumi Yamada, Kazuto
+N Sakabe, Yuka Shinada, Hiroko Kamimura (Teco Co.
+N Ltd.), Atsushi Kurata (Teco Co. Ltd.), Azusa
+N Ishizeki (Teco Co. Ltd.), Nao Nishida (Teco Co.
+N Ltd.), Himiko Fukahori (Teco Co. Ltd.), Takuya
+N Matsuda (NAC Inc.), Yosuke Muto (RHINO STUDIOS
+N INC.), Chiaki Toguchi (RHINO STUDIOS INC.), Daisuke
+N Higuchi (Tricrest inc), Takashi Saito (Tricrest
+N inc), Minoru Sugiyama (IMAGICADIGITALSCAPE Co.
+N Ltd.), Adelle Bueno
+T Lead Character Artist
+N Ryo Fujimaki
+T Character Artists
+N Takashi Konno, Hao Yuwen, Tomoko Hino, Gini Jeon,
+N Yuki Nakamura, Dai Pengfei, Yoshimi Hosaka (RHINO
+N STUDIOS INC.), Akito Aiba (CREEK & RIVER Co. Ltd.),
+N Eduardo Mosena
+T Lead Lighting / Effect / UI Artist
+N Hirokazu Akino
+T Effect Artists
+N Motofumi Ota, Yoshinori Takeuchi, Hiroaki Nagawa
+N (RHINO STUDIOS INC.)
+T Lighting Supervisor
+N Felix Jheani Mendoza
+T UI Artists
+N Sepide Donne Esfahani, Masaru Minokawa
+T Technical Advisers
+N Takaaki Yamagishi, Yuki Kato
+T Lead Animator / Enemy
+N Daisuke Kawano
+T Animators / Enemy
+N ChengChao Song, Yoshiki Kida, Nobuto Usui, Katsuya
+N Taniguchi (RHINO STUDIOS INC.), Yuki Shimoida (RHINO
+N STUDIOS INC.), Yasunori Takahashi (Tricrest inc),
+N Kazuya Iwata (CREEK & RIVER Co. Ltd.)
+T Lead Animator / Player
+N Takashi Sato
+T Animators / Player
+N Takayuki Imazu, Atsushi Keoroshi, Takahiko Hirata
+N (Teco Co. Ltd.)
+T Graphic Outsourcing
+N ADIA ENTERTAINMENT LTD., Jobin Co. Ltd., Lakshya
+N Digital PVT. LTD., Lemon Sky Animation Sdn Bhd,
+N Sunchos Software Co. ltd, TOSE SOFTWARE CO. LTD.,
+N Visual Flight Co. Ltd, XPEC Art Center Inc.
+T Animation Outsourcing
+N ANIMAROID Inc., Mix Inc., Tricrest inc
+T Lead Sound Designer
+N Tsukasa Saito
+T Sound Designers
+N Nobuyoshi Suzuki, Hideyuki Eto, Yuka Kitamura, Shoi
+N Miyazawa, Takashi Onodera
+T Concept Artists
+N Daisuke Satake, Hiroshi Nakamura, Masanori Waragai,
+N Masahiro Miki, Mai Hatsuyama, Kota Tonaki, Yusuke
+N Kato, Tetsu Takahashi, Ryuji Baba, Kento Koga,
+N Tsutomu Kitazawa, Wataru Kami, Emi Kaneko, Yusuke
+N Oda, Kouichirou Harada (CREEK & RIVER Co. Ltd.)
+T CG Movie Manager
+N Takayuki Muro
+T Cinematic / Real Time Artists
+N Shota Maruyama, Yusuke Higa, Dong-won Kim,
+N Shunichiro Watanabe, Hidemasa Takemoto, Tetsuya
+N Chiba, Keita Suyama
+T Promotion Designers
+N Hiroyuki Kani, Makiko Funada
+T Promotion
+N Yasunori Ogura
+T Project Support
+N Eiichi Nakajima, Yuzo Kojima, Hiroyuki Goto,
+N Yoshiyuki Ikeda, Reiko Tateno, Robert Simpson,
+N Motohiro Ogawa, Kairi Tsunoda
+T Special Thanks
+N Chikage Yamamura
+
+T Server Build: NTT PC Communications, Inc.
+T Managers
+N Junji Ogata, Yukichi Cho, Kyohei Asami
+
+T Outsourcing: KUSANAGI.Inc
+T BG Manager
+N Yoji Nakaza
+T Designers
+N Tadashi Iwasa, Takeshi Matsuzawa
+T Production Assistant
+N Hiroaki Hirata
+
+T Outsourcing: Sunchos Software Co.,ltd
+T Art Director
+N Jian Ping Qiu
+T Artists
+N Jiang Mei Xiang, Shou Rong Qiang, Yin Lu, Xu Xu Lin,
+N Chao Yu, Xu Lang, Qi Yang, MingGang Deng
+
+T Outsourcing: TOSE SOFTWARE (HANGZHOU) CO., LTD.
+T Coordinators
+N Hisashi Yamamoto, Wang Xiao
+T Lead Artist
+N Chen Jie
+T 2D Artists
+N Liu Songmin, Li Ming, Hu Yaobin, Li Yuan, Wang Jue,
+N Yang Di, Wu Xia, Wang Guangci
+T 3D Artists
+N Yu Minshu, Zhong Shadan, Liu Ruyi, Huang Xiang
+
+T Outsourcing: Visual Flight Co.,Ltd
+T Production Manager
+N Zhixian Tai
+T Production Assistant / Chief
+N Yan Fen
+T Production Assistants
+N Cheng Li, Fangping Li, Wei Han, Lei Tang
+T Team Leader
+N Jiujing Wan
+T Chief Designers
+N Jian Li, Li Jun
+T Designers
+N Zaiming Xiao, Teng Ma, Wei Cheng, Li Bou, Mao Weiwei
+
+T Outsourcing: XPEC Art Center Inc.
+T General Manager
+N Edward Yeh
+T Senior Sales Manager
+N Sally Huang
+T Sales Manager
+N David Kao
+T Art Director
+N Solomon Temowo
+T Project Managers
+N Silvia Lin, Nancy Wang, Joe Shu, Jessica Gao, Miki
+N Yang
+T Lead 2D Artist
+N Ruicai Liu
+T 2D Artists
+N Congjie Jiang, Xuefei Rui
+
+T Teaser Trailer: SHIROGUMI INC.
+T Producer
+N Yuichiro Iwaki
+T Director
+N Junya Morita
+T Line Producer
+N Line Producer
+T CG Directors
+N Shinji Kato, Shuhei Yamagata
+T Digital Artists
+N Satoru Goto, Junji Inagawa, Arisa Takasugi, Akimune
+N Tanaka, Mihoko Takahashi, Takafumi Maja, Shoko
+N Suzuki
+T Motion Capture Director
+N Yoshiko Koyama
+T Motion Capture Operators
+N Ayako Sakuma, Gaku Otsu, Masashi Tsuchiya
+T Motion Capture Actors
+N Keiichi Wada, Makoto Ito
+T Associate Companies
+N SPEED INC., RAYLINE STUDIO Inc., IMAGICA Corp.,
+N Motion Actors Japan
+
+H Umigame Jimusho Corporation
+T Teaser Trailer / CG Movie SV
+N Hiroyuki Hayashi
+
+H Script and Voice Recording
+T Script Writing and Voice Recording
+N Frognation Ltd
+T Production
+N Kengo Watanabe, Lynn Robson
+T Project Management
+N Ema Kodaka
+T Translation and Editing
+N Ryan Morris, Ian Milton-Polley, Ema Kodaka
+T Coordination and Assistance
+N Nozomi Oshima
+T Male Protagonist 1
+N Daniel Fine
+T Male Protagonist 2
+N Joe Simms
+T Male Protagonist 3
+N William Vanderpuye
+T Male Protagonist 4
+N Andrew Tiernan
+T Male Protagonist 5
+N Mathew Reeves
+T Female Protagonist 1
+N Lucy Briggs-Owen
+T Female Protagonist 2
+N Tilly Vosburgh
+T Female Protagonist 3
+N Emma Tate
+T Doll
+N Evetta Muradasilova
+T Old Hunter Gehrman
+N Allan Corduner
+T Annalise, Vileblood Queen
+N Jenny Funnel
+T Blood Minister
+N Peter Pacey
+T Provost Willem
+N Steven Elliot
+T Micolash, Host of the Nightmare
+N Ryan Gage, Steven Elliot
+T Oedon Chapel Dweller
+N Daniel Fine
+T Doctor Iosefka
+N Jenny Funnel
+T Impostor Doctor
+N Lucy Briggs-Owen
+T Narrow Minded Man
+N Lee Whitlock
+T Lonely Old Dear
+N Tilly Vosburgh
+T Transformed Man
+N Peter Pacey
+T Arianna, Woman of Pleasure
+N Pooky Quesnel
+T Critically Ill Man
+N Daniel Fine
+T Girl
+N Bo Chapman-Hailey
+T Older Sister
+N India Chapman-Hailey
+T Father Gascoigne
+N Connor Byrne
+T Sister Adella
+N Lucy Briggs-Owen
+T Retired Hunter Djura
+N William Houston
+T Vileblood Hunter Alfred
+N Daniel Flynn
+T Hunter of Hunters
+N Jacqueline Boatswain
+T Patches the Spider
+N William Vanderpuye
+T Vicar Amelia
+N Lucy Briggs-Owen
+T Gatekeeper
+N William Houston
+T Laurence
+N Daniel Fine, Joe Simms
+T Yharnamite (M1)
+N Joe Simms
+T Yharnamite (M2)
+N Steven Elliot
+T Yharnamite (F1)
+N Jacquline Boatswain
+T Yharnamite (F2)
+N Pooky Quesnel
+T Mob A
+N Ryan Gage
+T Mob B
+N Ryan Morris
+T Messengers
+N Joe Simms, Ryan Morris
+T Mob in Wheelchair
+N Mathew Reeves
+T Mob Woman
+N Kierston Wearing
+T Voice Recording Director
+N Adam Chapman
+T Voice Recording Engineers
+N Andy Stallabrass, Mark Hills
+T Casting
+N Adam Chapman, Vanessa Baker
+T Dialogue Editors
+N Michael Dunn, Leyton Rooney, James Kirk
+T Ingame Text Localisation
+N Frognation Ltd
+T Translators
+N Ryan Morris, Ian Milton-Polley, Ema Kodaka, Oliver
+N Scarborough
+
+T French Localisation: Around the Word
+T Doll
+N Fily Keita
+T Old Hunter Gehrman
+N Paul Borne
+T Annalise, Vileblood Queen
+N Annalise, Vileblood Queen
+T Blood Minister
+N Michel Dodane
+T Provost Willem
+N Denis Boileau
+T Micolash, Host of the Nightmare
+N Cyrille Monge
+T Oedon Chapel Dweller
+N Guillaume Lebon
+T Doctor Iosefka
+N Marie-Eugenie Marechal
+T Impostor Doctor
+N Marie Diot
+T Narrow Minded Man
+N Gerard Darier
+T Lonely Old Dear
+N Veronique Augereau
+T Transformed Man
+N Michel Dodane
+T Arianna, Woman of Pleasure
+N Olivia Nicosia
+T Critically Ill Man
+N Emmanuel Gradi
+T Girl
+N Adeline Chetail
+T Older Sister
+N Fily Keita
+T Father Gascoigne
+N Jeremie Covillault
+T Sister Adella
+N Marie Diot
+T Retired Hunter Djura
+N Serge Biavan
+T Vileblood Hunter Alfred
+N Loic Houdre
+T Hunter of Hunters
+N Isabelle Leprince
+T Patches the Spider
+N Daniel Lafourcade
+T Vicar Amelia
+N Fily Keita
+T Gatekepper
+N Serge Biavan
+T Laurence
+N Julien Chatelet
+T Yharnamite (M1)
+N Julien Chatelet
+T Yharnamite (M2)
+N Denis Boileau
+T Yharnamite (F1)
+N Veronique Augereau
+T Yharnamite (F2)
+N Adeline Chetail
+T Mob A
+N Cyrille Monge
+T Mob B
+N Paul Borne
+T Mob in Wheelchair
+N Jeremie Covillault
+T Mob Woman
+N Marie-Eugenie Marechal
+
+T Italian Localisation: Synthesis International
+T Doll
+N Jolanda Granato
+T Old Hunter Gehrman
+N Gianni Quillico
+T Annalise, Vileblood Queen
+N Alessandra Felletti
+T Blood Minister
+N Cesare Rasini
+T Provost Willem
+N Gianni Quillico
+T Micolash, Host of the Nightmare
+N Daniele Demma
+T Oedon Chapel Dweller
+N Federico Viola
+T Doctor Iosefka
+N Francesca Perilli
+T Impostor Doctor
+N Jolanda Granato
+T Narrow Minded Man
+N Riccardo Peroni
+T Lonely Old Dear
+N Riccardo Peroni
+T Transformed Man
+N Claudio Ridolfo
+T Arianna, Woman of Pleasure
+N Lorella De Luca
+T Critically Ill Man
+N Gabriele Calindri
+T Girl
+N Lorella De Luca
+T Older Sister
+N Francesca Perilli
+T Father Gascoigne
+N Lorenzo Scattorin
+T Sister Adella
+N Chiara Francese
+T Retired Hunter Djura
+N Riccardo Rovatti
+T Vileblood Hunter Alfred
+N Daniele Ornatelli
+T Hunter of Hunters
+N Elisabetta Cesone
+T Patches the Spider
+N Paolo Sesana
+T Vicar Amelia
+N Alessandra Felletti
+T Gatekepper
+N Riccardo Rovatti
+T Laurence
+N Federico Viola
+T Yharnamite (M1)
+N Daniele Demma
+T Yharnamite (M2)
+N Claudio Ridolfo
+T Yharnamite (F1)
+N Silvana Fantini
+T Yharnamite (F2)
+N Alessandra Felletti
+T Mob A
+N Renzo Ferrini
+T Mob B
+N Renzo Ferrini
+T Mob in Wheelchair
+N Cesare Rasini
+T Mob Woman
+N Cesare Rasini
+
+T German Localisation: 4-Real Intermedia
+T Doll
+N Lara Trautmann
+T Old Hunter Gehrman
+N Wolff von Lindenau
+T Annalise, Vileblood Queen
+N Gabi Franke
+T Blood Minister
+N Aart Vedder
+T Provost Willem
+N Wolff von Lindenau
+T Micolash, Host of the Nightmare
+N Martin Sabel
+T Oedon Chapel Dweller
+N Jens Wendland
+T Doctor Iosefka
+N Gisa Bergmann
+T Impostor Doctor
+N Susanne Grawe
+T Narrow Minded Man
+N Renier Baaken
+T Lonely Old Dear
+N Monika Muller-Heusch
+T Transformed Man
+N Aart Vedder
+T Arianna, Woman of Pleasure
+N Gergana Muskalla
+T Critically Ill Man
+N Sascha Nathan
+T Girl
+N Charlotte Uhlig
+T Older Sister
+N Charlotte Uhlig
+T Father Gascoigne
+N Richard van Weyden
+T Sister Adella
+N Lara Trautmann
+T Retired Hunter Djura
+N Hans-Jorg Krumpholz
+T Vileblood Hunter Alfred
+N Stephane Bittoun
+T Hunter of Hunters
+N Petra Konradi
+T Patches the Spider
+N Michael Lucke
+T Vicar Amelia
+N Lara Trautmann
+T Gatekepper
+N Hans-Jorg Krumpholz
+T Laurence
+N Martin Sabel
+T Yharnamite (M1)
+N Martin Sabel
+T Yharnamite (M2)
+N Hans-Jorg Krumpholz
+T Yharnamite (F1)
+N Monika Muller-Heusch
+T Yharnamite (F2)
+N Petra Konradi
+T Mob A
+N Heiko Grauel
+T Mob B
+N Richard van Weyden
+T Mob in Wheelchair
+N Michael Lucke
+T Mob Woman
+N Monika Muller-Heusch
+
+T Spanish Localisation: Synthesis International
+T Doll
+N Maria Blanco
+T Old Hunter Gehrman
+N Roberto Cuenca Martinez
+T Annalise, Vileblood Queen
+N Beatriz Berciano
+T Blood Minister
+N Leopoldo Ballesteros
+T Provost Willem
+N Leopoldo Ballesteros
+T Micolash, Host of the Nightmare
+N Miguel Zuniga
+T Oedon Chapel Dweller
+N Adrian Viador
+T Doctor Iosefka
+N Danai Jimenez
+T Impostor Doctor
+N Sara Heras
+T Narrow Minded Man
+N Alfonso Laguna
+T Lonely Old Dear
+N Alfonso Laguna
+T Transformed Man
+N Javier Martinez
+T Arianna, Woman of Pleasure
+N Sandra Jara
+T Critically Ill Man
+N Roberto Cuenca Martinez
+T Girl
+N Maria Blanco
+T Older Sister
+N Blanca Hualde
+T Father Gascoigne
+N Inaki Crespo
+T Sister Adella
+N Blanca Hualde
+T Retired Hunter Djura
+N Jorge Garcia Insua
+T Vileblood Hunter Alfred
+N Jesus Maniega
+T Hunter of Hunters
+N Isabel Donate
+T Patches the Spider
+N Abraham Aguilar
+T Vicar Amelia
+N Sara Heras
+T Gatekepper
+N Miguel Zuniga
+T Laurence
+N Adrian Viador
+T Yharnamite (M1)
+N Roberto Cuenca Rodriguez
+T Yharnamite (M2)
+N Inaki Crespo
+T Yharnamite (F1)
+N Isabel Donate
+T Yharnamite (F2)
+N Sandra Jara
+T Mob A
+N Fernando Elegido
+T Mob B
+N Javier Martinez
+T Mob in Wheelchair
+N Fernando Elegido
+T Mob Woman
+N Danai Jimenez
+
+T Dutch Localisation: INICIO Localization
+T Localisation Manager
+N Igo Verlinde
+
+T Portuguese Localisation: Synthesis International
+T Portuguese Localisation
+N Synthesis International
+
+T Polish Localisation: Qloc
+T Project Manager
+N Marcin Krol
+
+T Russian Localisation: The Most Wanted Games
+T Localisation Producer
+N Mikhail Bryukhanov
+T Localisation Coordinator
+N Andrei Zadorozhniy
+T Translators
+N Sergei Popov, Pavel Nechaev
+T Editor
+N Dmitry Vyrostkov
+
+T Danish Localisation: Local Heroes Worldwide
+T Project Managers
+N Larissa van Dijk, Sebastiaan de Witte
+T Translators
+N Jack Daniel Groth-Pinnerup, Troels Hegh
+
+T Finnish Localisation: Local Heroes Worldwide
+T Project Managers
+N Larissa van Dijk, Sebastiaan de Witte
+T Translators
+N Niko Juhani Sandell, Simo Autio, Isto Aitokari, Niko
+N Sandell
+
+T Norwegian Localisation: Local Heroes Worldwide
+T Project Managers
+N Larissa van Dijk, Sebastiaan de Witte
+T Translators
+N Morten Nrboe
+
+T Swedish Localisation: Local Heroes Worldwide
+T Project Managers
+N Larissa van Dijk, Sebastiaan de Witte
+T Translators
+N Andreas Pajarinen, Andreas Lundgren
+
+H Latin-American Spanish Localisation
+T LatinAmerican Spanish Localisation
+N RoundTable Studio, Caja de Ruidos
+T Dubbing Director
+N Ezequiel Lachman
+T Sound Engineers
+N Estanislao Lopez, Nicolas Calderon
+T Project Manager
+N Felix Londona
+T Doll
+N Lorena Munoz
+T Old Hunter Gehrman
+N Marcelo Armand
+T Annalise, Vileblood Queen
+N Mara Campanelli
+T Blood Minister
+N Carlos Celestre
+T Provost Willem
+N Javier Gomez
+T Micolash, Host of the Nightmare
+N Juan Manuel Echave
+T Oedon Chapel Dweller
+N Juan Manuel Echave
+T Doctor Iosefka
+N Natalia Rosminati
+T Impostor Doctor
+N Natalia Rosminati
+T Narrow Minded Man
+N Rolando Aguero
+T Lonely Old Dear
+N Constanza Fraggi
+T Transformed Man
+N Ricardo Alanis
+T Arianna, Woman of Pleasure
+N Luciana Falcon
+T Critically Ill Man
+N Alejandro Graue
+T Girl
+N Lucila Wowczuk
+T Older Sister
+N Cami Lach
+T Father Gascoigne
+N Javier Gomez
+T Sister Adella
+N Andrea Higa
+T Retired Hunter Djura
+N Jorge Riveros
+T Vileblood Hunter Alfred
+N Carlos Secilio
+T Hunter of Hunters
+N Susana Alcoba
+T Patches the Spider
+N Adrian Wowczuk
+T Vicar Amelia
+N Natalia Bernodat
+T Gatekepper
+N Rene Sagastume
+T Laurence
+N Wenceslao Corral
+T Yharnamite (M1)
+N Santiago Florentin
+T Yharnamite (M2)
+N Conrado Geron
+T Yharnamite (F1)
+N Jimena Vallejos
+T Yharnamite (F2)
+N Claudia Panone
+T Mob A
+N Pedro Ruiz
+T Mob B
+N Javier Gomez
+T Mob in Wheelchair
+N Marcelo Armand
+T Mob Woman
+N Jimena Vallejos
+
+T Brazilian Portuguese Localisation: DPN Santos
+T CEOs
+N Pedro Luiz de Paulo, Carlos Alberto Monteiro
+T Artistic Director
+N Pedro Luiz de Paulo
+T Technical Director
+N Carlos Alberto Monteiro
+T Financial Director
+N Debora de Paulo
+T Associate Producers
+N Andrea Nichols, Glaucia Velasco
+T Translator
+N Fabio Sooner
+
+T Turkish Localisation: 23 Studios
+T Project Manager
+N Gokhan Halil Duzgun
+T Lead Translator
+N Gokhan Halil Duzgun
+T Quality Assurance
+N Okan Sen, Erolcan Talas
+T Translators
+N Okan Sen, Arda Can Coskun, Cemre Serpal
+
+H Chinese Localisation
+T Simplified Chinese Localisation
+N Binari Sonori
+T Traditional Chinese Localisation
+N Binari Sonori
+
+H Korean Localisation
+T Korean Localisation
+N Edmund Zoo, Jae-Wook Ha
+
+H Sony Computer Entertainment
+T Producers
+N Masaaki Yamagiwa, Teruyuki Toriyama
+T Online Producer
+N Tatsuo Shinozaki
+T Technical Support
+N Kenjo Akiyama, Yasukichi Ohkawa, Yuji Kawamura,
+N Shuji Suzuki
+T Online Support
+N Keiichirou Suzuki, Tomomi Nakamura, Kumiko
+N Matsunaga, Mariko Sawada, Motoki Watanabe, Ayaka
+N Konishi, Takeshi Hotta, Tomonori Kowatari, Yasuyuki
+N Hiramaru, Nobuyuki Adachi, Hiroyuki Matsushima,
+N Nobuaki Tanaka
+T Music Production Supervisor
+N Keiichi Kitahara
+T Foley Recordists
+N Masao Kimura, Kazuma Kasuga, Akihito Tsuruzono
+T Dialogue Recording Coordinator
+N Noburo Masuda
+T Promotion Movie Production
+N Ryo Sogabe, Erina Masuzawa, Noriko Fujisaki, Shingo
+N Yoshimura, Tomoko Takahashi
+T Music Licensing Coordinator
+N Tatsuro Nakamura
+T User Test & Tuning
+N Shinya Nakamura, Naoko Isono, Sachie Matsuda,
+N Shigeru Kawai, Shota Tobari, Yuta Sasaki, Yukie
+N Katayama, Ai Ueda, Satoshi Takemae, Makoto Fujisaki,
+N Soudai Yamaguchi, Junya Tachikawa, Setsuna Yoshino,
+N Kyoko Suzuki
+T Quality Control Team
+N Yuzo Sugano, Takashi Tsurukami
+T Package Coordinators
+N Hironori Komiya, Yasuko Nii, Masamichi Furuse, Reiko
+N Tanihara, Mao Terahara
+T Licensing Coordinators
+N Chie Funayama, Takashi Aoki, Nanami Abe, Akiko
+N Matsubara, Atsushi Fujimori, Shinya Nakao
+T FPQA Japan
+N Sachiko Nagasawa, Yuichi Imai, Koji Takano, Osamu
+N Fukuya, Shigekazu Nagamori, Shingo Suzuki, Shigetaka
+N Kadekawa, Kota Shinoda, Seiya Shimizu, Haruna Kano,
+N Masayuki Nakamura, Daisuke Takashima, Hikaru Saito,
+N Hidekazu Sumida, Kazuhiro Kawanabe, Kenta Endo, Sho
+N Akimoto, Junya Ishizaki, Kyohei Kikuchi, Toshiyuki
+N Hachiya, Takuma Kondou, Yuu Mukai, Koichi Miyagi,
+N Daichi Kato, Kouichi Ikuta, Soichiro Masuda, Leaf
+N Morgan, Ayako Saito, Reed Baird, Susma Budhathoki,
+N Marko Bursac, Aya Nakajima, Ugo Ricard, Megumu
+N Kasai, Tomoo Miyazaki, Yuiko Ueno, Masashi Oikawa,
+N Osamu Hirose, Yusuke Yoshii, Teppei Kabata, Tetsuya
+N Ikejima, Marie Saito, Nanako Kurosawa, Seishiro Hata
+T Format QA Japan
+N Tomohiko Sato, Karin Kitoh, Kouichi Sera, Yui
+N Nagano, Yuki Sano, Sayaka Ito
+T First Party Publishing
+N Satoshi Satake, Taku Nishijima, Megumi Hayasaka,
+N Shuhei Nishimura, Daita Sakamoto
+T Marketing and Communication
+N Yoshinori Matsumoto, Seigo Sugai, Yasuhiro Kitao
+T Asia Strategy
+N Masafumi Chiba, Arata Naito, Satoshi Komuro, Hakuki
+N Lin
+T Overseas Coordinators
+N Yasutaka Asakura, June Miki, Mika Yokoo
+T Senior Producer
+N Kentaro Motomura
+T Executive Producer
+N Masami Yamamoto
+T Special Thanks
+N Atsushi Morita, Hiroyuki Oda, Hiroshi Ueda, Tomikazu
+N Kirita, Takahiro Kaneko, Kazuo Kato, Mena Sato,
+N Heesoo Kim, Mika Toyama, Brendon Pritchard, Nami
+N Makihara, Emiko Takehi, Yuki Tsuji, Isamu Terasaka,
+N Mizuki Tsuda, Tatsuya Suzuki, Nobuki Nagai,
+N Haruyoshi Sawatari, Noriko Umemura
+T Supervisors
+N Shuhei Yoshida, Allan Becker
+
+T Sony Computer Entertainment America: Worldwide Studios America
+T President, Sony Computer Entertainment Worldwide Studios
+N Shuhei Yoshida
+T Senior Vice President Worldwide Studios America
+N Scott Rohde
+T Senior Director, International Software Development
+N David Thach
+T Senior Producer / Manager
+N Tsubasa Inaba
+T Producers
+N Dais Kawaguchi, Kumi Yuasa-Fishback
+T Assistant Producer
+N Tomoyo Kimura
+T Manager, Business Finance & Ops
+N Karla Quiros
+
+T Sony Computer Entertainment America: SCEA Product Development Services Group
+T Vice President, Technology and CTO
+N Richard Lee
+T Senior Director, Services Group
+N David Murrant
+T Director, Music
+N Chuck Doud
+T Senior Manager, Sound Group
+N Gene Semel
+
+T Sony Computer Entertainment America: Multimedia
+T Senior Manager, Multimedia Group
+N Arran Green
+T Manager, Multimedia
+N Don Lacy
+T Production Supervisor
+N Matt Owca
+
+T Sony Computer Entertainment America: Global Platform
+T Vice President, Global Platform
+N Charles Connoy
+
+T Sony Computer Entertainment America: First Party Quality Assurance (FPQA)
+T Sr. Director, First Party Quality Assurance
+N Ritchard Markelz
+T Director, First Party Quality Assurance
+N Jeff Wilkerson
+
+T Sony Computer Entertainment America: Test Operations
+T QA Test Manager
+N Brandon Fenton
+T Senior Quality Assurance Testers
+N John Walker, David Bellinger
+T Contingent Game Test Analysts
+N Marcio Ribeiro de Morais, Jesse Black, D'Andre
+N Overstreet, Christina Fessenden, Chris Lapan,
+N Brandon Buchholtz
+
+T Sony Computer Entertainment America: Automation and Tools Team
+T Manager, Advanced Test Team
+N Brian Buhr
+T Lead Network Test Engineer
+N Paul J. Flannigan
+T Network Test Engineers
+N Robby Cheverton, Joshua Kahelin
+T Localization Test Lead / Coordinator
+N Christine B. Marin
+T US English Test Support / Localization Tester
+N Brian Apprille
+
+T Sony Computer Entertainment America: Release Management
+T Manager, Release Management
+N Eric Ippolito
+T Release Manager
+N Chad Shoemaker
+T Compliance Manager
+N Ian Jones
+T Associate Compliance Manager
+N Callista Tieu
+T Release Operative
+N Mylene Aslarona
+
+T Sony Computer Entertainment America: Support Services
+T Senior Manager, Global Support Services
+N Matt Harper
+T Manager, Translation Services
+N Mio Shimizu
+T Supplier Management Associate Manager
+N Yolanda Akil
+T Manager, Global Support Services
+N Shawn Moore
+T Sr. Application Administrator
+N Kevin Schatte
+T Application Support Analyst
+N Dave Evans
+T Application Support Specialist
+N Holly Meza
+T Translators
+N Chi Ichikawa, Noriko Sather
+T Associate Translator
+N Ed Chinen
+T Inventory Control Specialists
+N Kevin Heerlein, David Ambasing
+
+T Sony Computer Entertainment America: Product Development IT
+T Senior Director, Worldwide Studios Global IT
+N Steven Kirk
+T Director, Worldwide Studios Global (PD) IT - America
+N Sonnie Livesay
+T Senior Manager, Worldwide Studios Global (PD) IT - America
+N Vinh Tran
+T Manager, Information Technology SM (PD) IT
+N Travis Sher
+T Studio IT System Administrators
+N Colby Turner, Greg Yip
+T IT Support Specialist
+N Carl Hartenstein
+T Manager, PDIT Network Engineering
+N Michael Peay
+T Manager, Global Information Security
+N Christopher Hurley
+T Manager, System Engineering
+N Rob Blase
+T Senior Manager, Production Services and NOC
+N Daniel Godbout
+T Sr. Engineering Systems Administrators
+N Matt Diener, Alex Meyer, Christopher D'Ambrosio,
+N Staci Sanders, Jonathan Rad, Alan Green
+T Sr. Networking Administrators
+N Jeremy Lunsford, Ryan Patterson
+T Manager, Network Operations Center
+N Aaron W. Merrill
+T NOC Leads
+N Aaron Johnston, Mark Benavente, Matthew Keen
+
+T Sony Computer Entertainment America: Global Hosting
+T Director, Global Hosting (US)
+N Monique Fraser
+T Hosting Architect
+N Joel Johnston
+T Manager, Database Services
+N George Chen
+T Database Administrators
+N Andy Bui, Hannah Du, Chiru Manne, Matt Miller
+T Manager, US Hosting Sevices
+N Tyler Gaede
+T Hosting Engineers
+N Josephine Chia, Donovan Meyers, Jami Johnson, Tim
+N Wernicke, Steve Wormley, James Beck, Gilad Halevy
+T Manager, Hosting Infrastructure
+N Krisztian Mizser
+T Manager, US Hosting Management
+N Chris Baldwin
+T Technical Project Managers
+N Salil Joshi, Mine Okano, Doug Damron, Kelly
+N Bollinger, Sean D. Valencia
+T Sr. Vice President and CTO WWS
+N Richard Lee
+T Advanced Technology Group
+N Tobias Berghoff
+
+T Sony Computer Entertainment America: LAMS Team
+T Sr. Programmers
+N Christopher Burgess, Simon Ryan
+T Lead Programmer
+N David Simpson
+T Programmers
+N Cort Stratton, Jason Scanlin, Mohammad S. Borujeni,
+N Shan-Min Chao, Cedric Lallain, Bryan McNett, Basil
+N Milanich
+T Technical Project Manager
+N Paulwei Wang
+
+T Sony Computer Entertainment America: SCEA Brand Marketing
+T Senior Vice President, Brand Marketing
+N Guy Longworth
+T Executive Assistant
+N Nicole Vanegas
+
+T Sony Computer Entertainment America: First Party Games
+T Senior Director, PlayStation First Party Games
+N Asad Qizilbash
+T Director, First Party Games
+N Tim Kamienski
+T Marketing Department Assistant
+N Wendy Tan
+T Senior Manager, First Party Games
+N Mark Valledor
+T Brand Manager, First Party Games
+N Brian Dunn
+
+T Sony Computer Entertainment America: Platforms Marketing
+T Vice President, Platforms Marketing
+N John Koller
+T Senior Director, Home Platforms
+N Franco De Cesare
+T Senior Brand Manager, Home Platforms
+N Tyler Vaught
+T Assistant Brand Managers, Home Platforms
+N Cody Morales, Mia Putrino
+T Director, Licensing, Peripherals
+N Jon Regala
+T Senior Product Manager, Peripherals
+N Anand Agarwal
+T Licensing Specialist
+N Stephanie Fradue
+T Senior Manager, Licensing LATAM
+N Gerardo Riba
+T Senior Consumer Manager, Licensing
+N Hykeema Moorer
+
+T Sony Computer Entertainment America: Public Relations, Marketing Partnerships & Activation - Public Relations
+T Senior Director of Public Relations, Marketing Partnerships and Activiation
+N Jennifer Clark
+T Director, Product Public Relations
+N Alyssa Casella
+T Director, Corporate Communications
+N Karen Auby
+T Manager, Public Relations
+N Aram Jabbari
+T Generalist, Public Relations
+N Jake Jones
+
+T Sony Computer Entertainment America: Public Relations, Marketing Partnerships & Activation - Marketing Partnerships & Activation
+T Director Marketing Partnerships and Activation
+N Jill Erb
+T Brand Experience & Activation Manager
+N Shelly Richardson
+T Brand Activation Manager
+N Kristin Ferrito
+T Brand Partnerships Manager
+N Greg Zale
+T Specialist, Brand Experience & Marketing Communications
+N Michael Steranka
+T Specialist, Brand Experience
+N Meah Benage
+
+T Sony Computer Entertainment America: Creative, Design, Video & Events
+T Senior Director, Creative | Design | Video | Events
+N Joby Hirschfeld
+T Creative Logistics and Operations Sr. Manager
+N Lori Chase-Nardi
+T Sr. Manager, Events
+N Alyson Arrastio
+T Project Manager, Events
+N Alex Belfield
+T Events Specialists
+N Julia Scott, Joshua Armstrong
+T Creative Services Team
+N Jack Siler, Miguel Godinez, Larissa Gamarra, Nick
+N Reyes, Ayinde Benn, Sebastian Casallas, J. M.
+N Garcia, Tiffany Parcasio, Balinder Rajasansi, Alicia
+N Beam, Mary Disbrow, Blanca Hernandez, Margo Williams
+
+T Sony Computer Entertainment America: Creative, Design, Video & Events
+T Senior Manager, Art & Design
+N Blake Robertson
+T Creative Services Assets Manager
+N Ted Jalbert
+T Producers
+N Kim T. Ho, Kyra Ivanoff, Samantha Liss
+T CG Team Lead
+N Joshua Miller
+
+T Sony Computer Entertainment America: Video Services
+T Executive Producer & Director, Video Production
+N Michael Brynteson
+T Video Services Manager & Technical Producer
+N Brian Kellison
+T Manager, Video Operations
+N Tim Hart
+T Lead Video Editors
+N Richard Jones, Steven Gerhardt, Martin Garcia, Wayne
+N Simbro
+T Video Editors
+N Kenneth Warren, Jerome Chagnon, Matt Wong, Joseph
+N Pettinati, Alejandro Gonzalez, Diana Zogaric, Jeff
+N MacKinnon, Michelle Hauser, Chris Reagan
+T Senior Video Production Specialist
+N Rey Gutierrez
+T Producer & Video Production Managers
+N Alex Charlow, Katie Montgomery, FJ Bolger
+T Video Production Coordinator
+N Elizabeth Osborne
+T Video Production Studio Assistant
+N Greg Mosher
+
+T Sony Computer Entertainment America: Sony Computer Entertainment America: Strategic Brand Planning, Innovation & Communication
+T Vice President, Strategic Brand Planning, Innovation & Communication
+N Maria Surricchio
+T Executive Assistant
+N Olivia Barineau
+
+T Sony Computer Entertainment America: Consumer Insights
+T Director, Consumer Insights
+N Peter Summersgill
+T Senior Manager, Consumer Insights
+N Evan Stern, Marie Carpenter
+T Analyst, Consumer Insights
+N Nick Johnson
+T Senior Analyst, Consumer Insights
+N Jeffrey Johnson
+
+T Sony Computer Entertainment America: Strategy and Innovation
+T Director, Strategy and Innovation
+N Mary Yee
+T Senior Manager, Strategy and Innovation
+N Leland Hedges
+
+T Sony Computer Entertainment America: Analytics
+T Senior Manager, Customer Level Data
+N Danell Chang
+T Senior Analyst
+N Alex Kovalenko
+
+T Sony Computer Entertainment America: Digital Communications
+T Senior Director, Digital Communications
+N Brandon Stander
+T Marketing Coordinator
+N Lily Wei
+
+T Sony Computer Entertainment America: CRM
+T Senior Manager CRM and Loyalty
+N Steven Marjon
+T CRM Manager
+N Danielle Theisen
+T Email Marketing Specialist
+N Cassandra Schissler
+T Loyalty Marketing Manager
+N Carla Reyes
+T CRM Analytics Manager
+N Peter Liu
+T CRM Analytics & Operations Manager
+N Mina Kent
+T CRM Analyst
+N Bhuwaneswari Ramaswamy
+
+T Sony Computer Entertainment America: PS.com
+T Senior Manager PS.com
+N Nick Wemyss
+T Manager of Web Development
+N Agha Mehdi
+T Manager of Web Operations
+N Stephen Chandler
+T Manager of Editorial and Content
+N Chris Roper
+T Build Manager & Mobile
+N Jose Ochoa
+T Web Analytics Manager
+N Aman Singh
+T Senior Tech Developer
+N Jitender Kalsi
+T Web Developers
+N Adam Wisikoski, Arun Thaker, Leela Boddapati
+T Web PMO
+N Eric Huguet
+T Web Services Manager
+N Mary McInnis
+T Automation QA Engineer
+N Priscilla Peter
+T Project Manager
+N Michael Ng
+T Web Content & UX
+N Michael Tao, Sam Bishop
+T Senior Project Manager
+N Morgan Haro
+
+T Sony Computer Entertainment America: IMC
+T IMC Manager
+N Eve Kosol
+
+T Sony Computer Entertainment America: Community Management
+T Senior Manager, Community Management
+N Matthew Harper
+T Senior Community Specialists
+N Richard Imperial, Paul Sullivan, Kristine Steimer
+T Community Management & Social Media Intern
+N Jeffrey Monticelli
+
+T Sony Computer Entertainment America: Social Media
+T Senior Manager, Social Media
+N Sid Shuman
+T Social Media Specialists
+N Justin Massongill, Ryan Clements, Ran Cao
+T Senior Vice President, Sales
+N Tim Bender
+T Executive Assistant
+N Suzie Garcia
+
+T Sony Computer Entertainment America: Latin America
+T Director, Marketing, Latin America
+N Rossanna Aranibar
+T Manager, Product Marketing
+N Noboru Yamawaki (Nobie)
+T Product Marketing Specialist
+N Mabel Castro
+T Manager, Trade Marketing and Events
+N Matias Serebrinsky
+T Event Project Manager
+N Sue Aguilar
+T Manager, 3rd Party and Public Realtions
+N Ken Balough
+T Manager, Brand Marketing
+N Mariana Lee
+T Public Relations Specialist
+N Lorenzo Grajales
+T Sr. Digital Marketing Specialist
+N Aaron Alvarez
+
+T Sony Computer Entertainment America: Legal & Business Affairs
+T Senior Vice President & General Counsel
+N Riley R. Russell III
+T Executive Assistant
+N Leslie Hoffman
+T Senior Director, Legal & Business Affairs
+N Anthony J. Justman
+T Senior Corporate Counsel
+N Lindsey Mohle
+T Senior Directors, Legal & Business Affairs
+N Steve T. Madsen, Anthony J. Justman
+T Senior Corporate Counsel, Legal & Business Affairs
+N Philip C. Piliero
+T Senior Manager, Legal & Business Affairs
+N Christine DeNezza
+T Senior IP Paralegal, Legal & Business Affairs
+N Richard Daniels
+T Paralegals
+N Anthony Peterson, Daniel Short
+
+T Sony Computer Entertainment America: SCEA Music Department
+T Director of Music
+N Chuck Doud
+T Score Produced by
+N Peter Scaturro, Keith Leary
+T Music Engineering and Production Supervisor
+N Joel Yarger
+T Music Mixed by
+N Anthony Caruso, Jonathan Mayer, Marc Senasac
+T Score Preparation and Editing by
+N Monty Mudd, Ted Kocher
+T Editing by
+N Scott Hanau, Matt Levine
+T Sr. Manager, Music Affairs
+N Jason Swan
+T Project Manager
+N Tammy Tsuyuki
+T Sr. Music Licensing Coordinator
+N Justin Fields
+T Sr. Music Department Coordinator
+N Vanessa Zamora
+T Sr. Music Department Assistant
+N Angelica Garde
+T Music Composed by
+N Ryan Amon, Tsukasa Saito, Yuka Kitamura, Nobuyoshi
+N Suzuki, Cris Velasco, Michael Wandmacher
+T Orchestration by
+N Penka Kouneva
+T Additional Orchestration by
+N Jim Fowler
+T Orchestral Score Recorded at AIR Studios and Abbey Road Studios, London by
+N Andrew Dudman, Adam Miller
+T Orchestra and Choir Conducted by
+N Ben Foster
+T Orchestra Contractor
+N Isobel Griffiths
+T Assistant Orchestra Contractor
+N Lucy Whalley
+T Orchestra Leader
+N Everton Nelson
+T Choir
+N Metro Voices
+T Choirmaster
+N Jenny O'Grady
+T UK Music Preparation & Librarion
+N Jill Streater
+T Featured Vocalist
+N Melissa Reese
+
+T Sony Computer Entertainment America: Special Thanks
+T We would like to thank
+N Each individual at Sony Computer Entertainment
+N America for their contributions; support and
+N dedication to the success of Bloodborne with special
+N recognition to the Executive Management team
+N including:, Andrew House, Shawn Layden, Jim Bass,
+N Guy Longworth, Scott Rohde, Glenn Nash, Riley R.
+N Russell III, Phil Rosenberg, Tim Bender, Shuhei
+N Yoshida
+
+T Sony Computer Entertainment Europe: Sony Computer Entertainment Europe: International Software Development
+T Producer
+N Jun Yoshino
+T Executive Producer
+N Elodie Hummel
+T Events and Communications Managers
+N Tom Blackmore, Iona Sugihara
+T Director, International Software Development and Localisation Services
+N Sean Kelly
+T Project Manager, Localisation Services
+N Mark Timmins
+
+T Sony Computer Entertainment Europe: WWS Creative Services Group
+T Director of Creative Services
+N Dan Bardino
+T Head of Project Management
+N Aya Aisu
+T Project Manager
+N Davinia Martin
+T Senior Project Manager
+N Lee Page
+T Motion Graphics Manager
+N Nigal Raymond
+T Graphic Design Manager
+N Oliver Wright
+T Art Director
+N Oliver Ruddick
+T Art and Video Production Assistant
+N John Blake
+T Music Production Manager
+N Alastair Lindsay
+T Production Manager
+N Gillian Connole
+T Audio Visual Manager
+N Steve O'Callaghan
+T Music Orchestration & Preparation
+N Jim Fowler
+T Video Supervisor
+N Sean Ashurst
+T Production Assistant
+N Martin Lopez
+T Senior Video Designer
+N Andy Robinson
+T Senior Video Producer
+N Mark Zajac
+T Video Designers
+N Jeff Culshaw, Nick Beedles
+
+T Sony Computer Entertainment Europe: Music Licensing Department
+T Music Licensing Manager
+N Martin Hewett
+T Music Supervisors
+N Lindsey Smith, Leslie Amos
+T Senior Music Supervisors
+N Duncan Smith, Fiona Regan
+
+T Sony Computer Entertainment Europe: European Software Marketing
+T Vice President of Product Marketing
+N Usama Al-Qassab
+T Director of European Software Marketing
+N Toby Morrish
+T Marketing Manager
+N Chris Weatherhead
+T Senior European Product Manager
+N Penrose Tackie
+T European Product Manager
+N Chris Brown
+T European Head of PR
+N Nick Caplin
+T Senior European PR Managers
+N Gemma Gallais, Jessica Benson
+T Junior Project Manager, PR
+N Sasiprapa Charlanawat
+T European Release Manager
+N Robert Walker
+T New Release Assistants
+N Kelly-Marie Ridgers, Jonathan Holmes
+T Online Campaign Producer
+N Tim Comerford
+T Social Media and Community Manager
+N Roberto Kusabbi
+T Events Manager
+N Rebecca Knight
+T Events Assistant
+N Isabelle Adams
+T Head of Online Content and Copywriting
+N Russell Coburn
+T Online Content Producer
+N Corey Brotherson
+T Senior Copywriter
+N Sam Holding
+T Copywriters
+N Hannah Davies, Joe Hibbs, Dom Wiggan, Rhys Sutheran
+T Creative Services Localisation Coordinators
+N Miguel Lerma Garcia, Jana Rhode, Aneta Grabiec,
+N Ionna Delatola, Cecila Di Vita
+T Video Editor
+N Katy Aldred
+T Head of Graphic and Online Design
+N Antony Grace
+T Graphic Designer
+N Jez Potter
+T Senior Graphic Designer
+N Andy Hope
+T Online Design Manager
+N Ed Easton
+T Online Design
+N Wael Nauib
+
+T Sony Computer Entertainment Europe: SCEE Legal and Business Affairs
+T Vice President of SCEE Legal and Business Affairs
+N Marian Toole
+T Head of Publisher and Legal Affairs
+N Julia Foguel
+T Head of Content
+N Stacey Fowler
+T Legal and Business Affairs Manager
+N Mohummad Mia
+T Director of Intellectual Property & Technology
+N Hogarth Andall
+T Trade Mark & Anti Piracy Manager
+N Alessandro Cimaschi
+T Legal and Business Affairs Executive
+N Mandana Jenabzadeh
+T Licensing Manager
+N Richard Guest
+T Head of Consumer Legal and Business Affairs
+N Nicola Berry
+T Legal and Business Affairs Assistant
+N Nathalie Closs
+
+T Sony Computer Entertainment Europe: SCEE Research & Development
+T Director of SCEE R&D
+N Mike Kavallierou
+T Head of Network R&D
+N Phil Rogers
+T Senior Team Leader
+N David Carter
+T Team Administrator
+N Larissa Boaventura
+
+T Sony Computer Entertainment Europe: Special Thanks
+T Special Thanks
+N Andrew Pugsley, Adam Lay, Daniel Brooke, Daniele
+N Tacconi, Ed Bushell, Elliott Martin, Florence Kum,
+N Gavin Russell, Gunnar Hojem, Jan Kuczynski, Mayuko
+N Kezuka, Olivier Banal, Laura Cattaneo, Nadege Josa,
+N Natasha Griffiths, Piermaria Mendolicchio, Shiva
+N Allari, Robert Simpson, Shigenori Nishikawa,
+N Michelle Tilley, Catrin Williams, Jim Ryan, Lisa
+N Cochrane (RDP Creative), Ali Kazim (RDP Creative),
+N Nabil Dieng (Kendo), Vitor De Magalhaes, Melanie
+N Clegg, Mika Ishihara, Emma Tsukatani, Risa
+N Kitabayashi, Munehiro Murakami, Wilson Au Yeung,
+N Kanami Aizawa, Jason Holden, Nicolas Dumaille,
+N Vincent Gaudin (VOSCA), Hugo Bustillos, Hollie
+N Bennett, Shuhei Yoshida, Masami Yamamoto, Dave
+N Thatch, Fergal Gara, Frank Glazer (Future Press),
+N Simon Rutter
+
+T Sony Computer Entertainment Europe: Global First Party Quality Assurance Europe
+T Director - First Party Quality Assurance Europe
+N David Parkinson
+T Department Assistant
+N Kate Murray
+
+T Sony Computer Entertainment Europe: GFPQA-E Release Management
+T Manager, GFPQA-E Release Management
+N Justin Bailey
+T Associate Manager, GFPQA-E Release Management
+N Steven Pajak
+T Senior Release Manager, GFPQA-E Release Management
+N Michelle Tilley
+T Release Managers, GFPQA-E Release Management
+N Andrew Godden, Joe Johnson
+T Release Operative, GFPQA-E Release Management
+N Mark Rice
+
+T Sony Computer Entertainment Europe: GFPQA Business Operations
+T Junior Business Analyst, GFPQA Business Operations
+N Sean Lawrence
+
+T Sony Computer Entertainment Europe: Test Operations
+T Senior Manager
+N Nadine Martin
+T Test Manager
+N Daniel Giles
+T Functional Test Lead
+N Jonathan Williams
+T TRC Test Lead
+N Gary Jones, John Hale, Lee Champion
+T Functional Tester
+N Sam Hughes
+T Functional Testers (Contract)
+N Ian Maguire, Tony Robinson
+T TRC Testers
+N Donald Shallcross, Lee O'Connor, Stephen Quayle,
+N Peter Abraham, Daniel Otim, Simon Gibson, Nathan
+N James, Jeffery McLeary, Steven Kelly, Philip Wright,
+N Lee Jones, Alex Trusty, Marc Shannon, Stephen
+N Wignall, Kirk Mackey
+T Localisation Test Lead
+N Chad Collinson
+T Localisation Testers
+N Alexander Lavrenov, Jack Howarth, Joanna Skorupa,
+N Manuel Angel Tena, Matteo Turrino, Rossella
+N Rondanina, Sandrine Cao, Susanne Plath
+T Contract Staff Coordinators
+N Stephen Gaskell, Tom Nicholson-Ihara
+
+T Sony Computer Entertainment Europe: Automation and Tools
+T Manager, Automation & Tools
+N Michael Davies
+T Senior Test Engineer
+N Nathan Barguss
+T Test Engineer
+N Arran Ewing
+T Software Development Engineers in Test
+N Michael Kennedy, Robert Anderson, Ajeet Dhaliwal
+T Test Analysts
+N Christopher Greaves, Samu Kankaanpaa, Giovanna
+N Pellegrino
+
+T Sony Computer Entertainment Europe: Support Services
+T Manager, Support Services
+N Anthony Gill
+T Associate Manager, Support Services
+N Neil Moran
+T Translator
+N Anri Iwasaki
+T Principal Support Operatives
+N Christian Hopley, Michael Bishop
+T Senior Support Operatives
+N Matthew Adderley, Simon Edwards
+T Support Operatives
+N Matthew Phillips, Steven Weir
+T Supplier Management Lead
+N Yolanda Akil
+T Senior Supplier Coordinator
+N Natalia Craddock
+T Supplier Coordiantor
+N Greg Tarka
+
+T Sony Computer Entertainment Europe: Product Development IT Europe
+T Director PDIT Europe
+N Jon Mechan
+
+T Sony Computer Entertainment Europe: Management Team
+T Head of Operations Northwest
+N Vidya Sunderamoorthy
+T Head of Operations Southeast
+N Darren Rawlings
+T Head of Technical Architecture
+N Simon Dickinson
+T Head of Shared Services
+N Paul Davis
+T Procurement Manager
+N Nick Ryder
+
+T Sony Computer Entertainment Europe: Technical Architecture
+T Storage Architect
+N Dean Miller
+T Network Architect
+N Mark Horabin
+
+T Sony Computer Entertainment Europe: Shared Services
+T PMO Manager
+N Adam Walker
+T Project Managers
+N Amber Shaida, Naveed Badel
+T Web Developer
+N Chao Zhang
+T Service Manager
+N Rob Bing
+T Lead Engineer Northwest
+N Barry John Edwards
+T Lead Engineer Southeast
+N Dan Shanks
+T Engineering Specialists
+N Andrew Copeland, Mark Hall, Andrew Taylor, Stuart
+N Corkhill, Kris Buglear, Vinny Pereira
+
+T Sony Computer Entertainment Europe: Operations - Cambridge
+T Desktop Support Analyst
+N Martin Acott
+T Lead Infrastructure Analyst
+N Simon Miller
+
+T Sony Computer Entertainment Europe: Operations - Liverpool
+T Lead Desktop Support Analyst
+N Michael James
+T Desktop Support Analysts
+N Phil Cassidy, Ryan Gamble
+T Lead Infrastructure Analyst
+N Javier Giganto
+T Infrastructure Analyst
+N Kevin Georgeson
+
+T Sony Computer Entertainment Europe: Operations - London
+T Lead Desktop Support Analyst
+N Miguel Teixeira
+T Desktop Support Analysts
+N Bay Williams, Gavin Yates, Jermaine Ray
+T Lead Infrastructure Analyst
+N Matthew Owen
+T Infrastructure Analysts
+N Jeremy Allen, Oliver James Whittington
+T Network Analyst
+N Shaun Smith
+T Tech Integration Specialist
+N Chris Richards
+
+T Sony Computer Entertainment Europe: Operations - Runcorn
+T Lead Desktop Support Analyst
+N Chris Evans
+T Desktop Support Analysts
+N Carl Quinn, Chris McCann, Lauren Corkill
+T Tech Integration Specialist
+N Paul Connolly
+
+H THANK YOU FOR PLAYING

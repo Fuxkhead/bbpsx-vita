@@ -1,0 +1,90 @@
+# slot: path pieces (matched against paths in the exported Audio folder)
+swing:         foley/wooshes/a_swing-cleavero
+swing_heavy:   foley/wooshes/a_swingbig
+hit:           foley/impacts/a_iron-cut-meat
+gun:           guns/a_sprj_gun_shot
+parry:         gameplay/a_sprj_kill_chance | peak=-2
+visc:          gameplay/a_visceralfinal
+dodge:         foley/dodges/a_body-lobe-b
+player_hurt:   gameplay/a_smallcut, foley/impacts/a_blood1, foley/impacts/a_blood3
+player_death:  vo/hunter/
+enemy_swing:   foley/wooshes/a_swing-sword, foley/wooshes/a_swing_whip
+enemy_hurt:    vo/yhnmt/a_yhnmt_hurt
+enemy_death:   vo/yhnmt/a_yhnmt_death
+rat_atk:       enemies/rat/a_ratscream, enemies/rat/a_ratcharge
+rat_hurt:      enemies/rat/a_rathurt
+rat_death:     enemies/rat/a_ratdeath
+crow_atk:      enemies/carrioncrow/a_crowattackflurry
+crow_death:    enemies/carrioncrow/a_crowcaw
+boss_swing:    vo/gascoigne/a_gas_gruntswing
+boss_swing_b:  vo/gascoigne/a_gasb_swing
+boss_hurt:     vo/gascoigne/a_gas_grunthurt
+boss_death:    vo/gascoigne/a_gasb_death
+step:          foley/steps/a_foot_stone_run_dry, foley/steps/foot-stone-l | peak=-12
+ladder:        foley/steps/a_ladder | peak=-12
+door:          foley/machinery/door/a_doorsmallopen
+door_big:      foley/machinery/a_bigdooropen
+switch:        foley/machinery/a_switchpull
+lift:          foley/machinery/a_mechanicalrumble
+drink:         gameplay/a_drink
+pickup:        gameplay/a_itemget
+echo:          gameplay/a_echoessoul-suck-bonus
+youdied:       gameplay/a_youdiedprompt
+fog:           gameplay/a_foggatetraverse
+boss_axe:      vo/gascoigne/a_gas_axetrans2
+boss_beast:    vo/gascoigne/a_gasbeasttransform
+boss_yell:     vo/gascoigne/a_gas_grunthurt | peak=-2
+boss_step:     vo/gascoigne/a_gas_step | peak=-6
+beast_step:    vo/gascoigne/a_gasb_step | peak=-4
+boss_dash:     vo/gascoigne/a_gasb_dash, vo/gascoigne/a_gasb_launch
+boss_growl:    vo/gascoigne/a_gas_growl
+gun_draw:      foley/machinery/a_sprj_gun_reload1 | peak=-10
+holster:       guns/a_gunholster | peak=-10
+gun_empty:     guns/a_gunempty | peak=-8
+recover:       gameplay/a_recovery_collected | peak=-8
+lantern:       ambient/a_levelupamb | peak=-6
+refresh:       gameplay/a_itemrefresh | peak=-8
+bullet:        ui/a_item_soubi | peak=-10
+aggro:         vo/yhnmt/a_yhnmt_yell, vo/yhnmt/a_yhnmt_awayaway, vo/yhnmt/a_yhnmt_burnburn2, vo/yhnmt/a_yhnmt_mashupbrain, vo/yhnmt/a_yhnmt_notwantedhere
+uibad:         ui/a_uibad | peak=-10
+step_wood:     foley/steps/a_foot-wood | peak=-12
+step_water:    foley/steps/foot-water | peak=-10
+splash:        foley/impacts/a_watersplash | peak=-8
+boulder:       foley/impacts/a_stonecrumble | peak=-6
+boulder_hit:   enemies/clericbeast/a_bigbeastimpact, foley/impacts/a_wallhit | peak=-4
+rat_step:      enemies/rabiddog/a_steppaw | peak=-16
+amb_wind:      ambient/a_windambient | peak=-14, len=20
+amb_rain:      ambient/a_rain | peak=-14, len=20
+amb_water:     ambient/a_waterstream | peak=-12, len=20
+amb_lamp:      ambient/a_lanternamb | peak=-14, len=20
+lightning:     ambient/a_lightning1 | peak=-8
+thunder:       ambient/a_thunder1, ambient/a_thunder2 | peak=-6
+bell:          ambient/a_churchbell | peak=-10
+mus_intro:     music/a_thehunterp1intro | peak=-10, len=240, rate=32000
+mus_loop1:     music/a_thehunterp2nrmloop | peak=-10, len=240, rate=32000
+mus_trans:     music/a_thehunterp3interlude | peak=-10, len=240, rate=32000
+mus_loop2:     music/a_thehunterp4beastloop | peak=-10, len=240, rate=32000
+cb_swing:      enemies/clericbeast/a_bigbeastwoosh | peak=-4
+cb_step:       enemies/clericbeast/a_bigbeaststep | peak=-4
+cb_howl:       enemies/clericbeast/a_clericbeasthowl
+cb_hurt:       enemies/clericbeast/a_clericbeasthurtscream1
+cb_death:      enemies/clericbeast/a_clericbeastscream2
+cb_roar:       enemies/clericbeast/a_clericbeastscream1
+cb_impact:     enemies/clericbeast/a_bigbeastimpact | peak=-3
+mus_cb_intro:  music/a_clericbeast_intro | peak=-10, len=240, rate=32000
+mus_cb_loop:   music/a_clericbeast_loop | peak=-10, len=240, rate=32000
+mus_night:     music/a_deepnightintrocutscene | peak=-10, len=30, rate=32000
+w_bld_curve:   gameplay/weaponspecific/bladesofmercy/a_bladescurve
+w_bld_whirl:   gameplay/weaponspecific/bladesofmercy/a_bladeswhirl
+w_bld_gleam:   gameplay/weaponspecific/bladesofmercy/a_bladesgleam
+w_bld_slide:   gameplay/weaponspecific/bladesofmercy/a_bladesslide
+w_bld_xform:   gameplay/weaponspecific/bladesofmercy/a_bladestransform
+w_spear_xform: gameplay/weaponspecific/bloodspear/a_bloodspeartransform
+w_cleav_xform: gameplay/weaponspecific/cleaver/a_cleavertransform
+w_cane_asm:    gameplay/weaponspecific/cane/a_caneassemble
+w_cane_chain:  gameplay/weaponspecific/cane/a_canechain
+w_shot_shoot:  gameplay/weaponspecific/dbshotgun/a_shotgunshoot
+w_shot_load:   gameplay/weaponspecific/dbshotgun/a_shotgunload
+w_flame_start: gameplay/weaponspecific/flamesprayer/a_flamethrowerstart
+w_toni_act:    gameplay/weaponspecific/tonitrus/a_toni_activate
+w_toni_break:  gameplay/weaponspecific/tonitrus/a_toni_break

@@ -1,0 +1,4 @@
+# BBPSX settings (edit, save, restart the game)
+# resolution: native, half, ps1, ps1hud (PS1 3D + native HUD), halfhud (half-res 3D + native HUD), or WIDTHxHEIGHT
+resolution = halfhud
+snap = on

@@ -1,0 +1,8 @@
+# Map links. Format:  map:LoaderName = othermap:LoaderName
+# A link works both ways unless the other end has its own line. Map names match level_<name>.bin.
+# Junction ladders: LoaderName -> which ladder
+#   BP_LevelLoader_3 = ladder next to the spawn (18 m)    BP_LevelLoader4 = tall ladder (24 m)    BP_LevelLoader7 = tallest, north (32 m)
+# Boulder Bridge ladders: BP_LevelLoader4 = at the start (spawn),  BP_LevelLoader2 = further in
+start = junction
+junction:BP_LevelLoader7 = boulderbridge:BP_LevelLoader4
+boulderbridge:BP_LevelLoader3_2 = gascoignearena:BP_LevelLoader_2
