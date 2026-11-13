@@ -7,9 +7,33 @@
 map.txt has one line per slot:   slot: pattern1, pattern2, ...
 A pattern is a piece of a file's path (any case, extension ignored); every file matching any pattern is used (at most 6 per slot, picked at random in game).
 Slot names are whatever main.c expects (see map.txt).
-Needs ffmpeg (sudo apt install ffmpeg).  Copy <out_dir> to ux0:data/bbpsx/snd/ on the Vita.
+Needs, either:  pip install soundfile scipy numpy   (no ffmpeg; reads .ogg .wav .flac .opus)
+          or:  ffmpeg (sudo apt install ffmpeg)   (any format; used when soundfile is missing or can't read a file)
+Force one:  BBPSX_SOUND=python  or  BBPSX_SOUND=ffmpeg.  Copy <out_dir> to ux0:data/bbpsx/snd/ on the Vita.
 """
 import os, sys, subprocess, random
+try:
+    import numpy as np, soundfile as sf
+    from scipy.signal import resample_poly
+    from math import gcd
+    HAVE_PY = True
+except Exception:
+    HAVE_PY = False
+MODE = os.environ.get('BBPSX_SOUND', '').lower()      # '', 'python' or 'ffmpeg'
+
+def convert_py(src, dst, length, rate, peak):
+    """Python-only conversion: first `length` seconds, mono, `rate` Hz, 16-bit WAV, loudest sample at `peak` dB (None = leave the level)."""
+    data, sr = sf.read(src, dtype='float32', always_2d=True)
+    data = data[:int(length * sr)]
+    if data.shape[0] == 0: raise ValueError('empty file')
+    pk = float(np.max(np.abs(data)))
+    gain = 1.0
+    if peak is not None and pk > 1e-6: gain = 10.0 ** (peak / 20.0) / pk      # loudest sample of the original -> `peak` dB
+    mono = data.mean(axis=1)
+    if sr != rate:
+        g = gcd(int(sr), int(rate)); mono = resample_poly(mono, int(rate) // g, int(sr) // g).astype(np.float32)
+    out = np.clip(mono * gain, -1.0, 1.0)
+    sf.write(dst, out, int(rate), subtype='PCM_16', format='WAV')
 EXT = ('.ogg', '.wav', '.wem', '.mp3', '.flac', '.opus', '.m4a', '.adpcm', '.bnk')
 SLOTS = ['swing', 'swing_heavy', 'hit', 'gun', 'parry', 'visc', 'enemy_swing', 'boss_swing', 'player_hurt', 'enemy_death', 'dodge']
 
@@ -29,6 +53,7 @@ def scan(root):
     print('%d audio files -> sound_list.txt' % len(fl))
 
 def build(root, out, mp):
+    if MODE == 'python' and not HAVE_PY: sys.exit('BBPSX_SOUND=python, but soundfile / scipy / numpy are not installed: python3 -m pip install --user soundfile scipy numpy')
     os.makedirs(out, exist_ok=True)
     fl = files(root)
     random.seed(1)
@@ -54,15 +79,22 @@ def build(root, out, mp):
             hit = sorted(random.sample(hit, 6))
         for n, p in enumerate(hit, 1):
             dst = os.path.join(out, '%s_%d.wav' % (slot, n))
-            af = []
-            if peak is not None:
-                v = subprocess.run(['ffmpeg', '-hide_banner', '-i', os.path.join(root, p), '-t', str(length), '-af', 'volumedetect', '-f', 'null', '-'], capture_output=True, text=True).stderr
-                for ln in v.splitlines():
-                    if 'max_volume:' in ln:
-                        try: af = ['-af', 'volume=%.2fdB' % (peak - float(ln.split('max_volume:')[1].split('dB')[0]))]
-                        except ValueError: pass
-            r = subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', os.path.join(root, p), '-t', str(length), '-ac', '1', '-ar', str(rate)] + af + ['-sample_fmt', 's16', dst])
-            print('%-12s %d  <- %s%s' % (slot, n, p, '' if r.returncode == 0 else '   FAILED'))
+            src = os.path.join(root, p); ok = False; how = ''
+            if HAVE_PY and MODE != 'ffmpeg':
+                try: convert_py(src, dst, length, rate, peak); ok = True; how = 'python'
+                except Exception as e:
+                    if MODE == 'python': print('%-12s %d  <- %s   FAILED (%s)' % (slot, n, p, e)); continue
+            if not ok:
+                af = []
+                if peak is not None:
+                    v = subprocess.run(['ffmpeg', '-hide_banner', '-i', src, '-t', str(length), '-af', 'volumedetect', '-f', 'null', '-'], capture_output=True, text=True).stderr
+                    for ln in v.splitlines():
+                        if 'max_volume:' in ln:
+                            try: af = ['-af', 'volume=%.2fdB' % (peak - float(ln.split('max_volume:')[1].split('dB')[0]))]
+                            except ValueError: pass
+                r = subprocess.run(['ffmpeg', '-loglevel', 'error', '-y', '-i', src, '-t', str(length), '-ac', '1', '-ar', str(rate)] + af + ['-sample_fmt', 's16', dst])
+                ok = r.returncode == 0; how = 'ffmpeg'
+            print('%-12s %d  <- %s%s' % (slot, n, p, ('   [' + how + ']') if ok else '   FAILED'))
         if not hit:
             print('%-12s (nothing matched %s)' % (slot, pats))
 

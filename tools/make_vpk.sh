@@ -4,9 +4,12 @@
 P="${1:-$HOME/bbpsx-vita}"
 OUT="${2:-$HOME/Downloads/bbpsx.vpk}"
 B="$P/build"
-[ -f "$B/eboot.bin" ] || { echo "no $B/eboot.bin - run make first"; exit 1; }
-[ -f "$B/param.sfo" ] || { echo "no $B/param.sfo - run make first"; exit 1; }
-ARGS=(-s "$B/param.sfo" -b "$B/eboot.bin")
+EBOOT="$B/eboot.bin"; [ -f "$EBOOT" ] || EBOOT=$(ls "$B"/*.self 2>/dev/null | head -1)      # the CMake build makes <name>.self; the VPK stores it as eboot.bin
+SFO="$B/param.sfo"; [ -f "$SFO" ] || SFO=$(find "$B" -maxdepth 2 -name "*param.sfo" 2>/dev/null | head -1)      # the CMake build names it <name>.vpk_param.sfo
+[ -f "$EBOOT" ] || { echo "no eboot.bin / *.self in $B - run make first. Found:"; ls "$B"; exit 1; }
+[ -f "$SFO" ] || { echo "no param.sfo in $B - run make first. Found:"; ls "$B"; exit 1; }
+echo "  eboot: $EBOOT"; echo "  param.sfo: $SFO"
+ARGS=(-s "$SFO" -b "$EBOOT")
 S="$P/sce_sys"
 add() { [ -f "$S/$1" ] && { ARGS+=(-a "$S/$1=sce_sys/$1"); echo "  + sce_sys/$1"; } || echo "  - missing sce_sys/$1 (skipped)"; }
 add icon0.png

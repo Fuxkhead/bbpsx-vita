@@ -4,9 +4,9 @@ This kit builds the Vita port of Bloodborne PSX **from your own copy of the game
 hand-written settings only: **no Bloodborne PSX art, models, maps, music or voices are included**. The data you build from them is derived
 from the game's files, so keep it for your own use unless you have permission to share it.
 
-> **Status: honest warning.** The game source was written and checked on a PC; everything here was only ever compiled and run by the me on my Vita.
-> `pack_icons.py`, `pack_rgba.py` and `make_dlgfont.py` have **not** been tested by anyone. The included `CMakeLists.txt` is my own working file.
-> The hunter.bin build is documented in the header of `tools/convert_hunter.py`; the weapon / pistol / tint options of my own last run are not tested from this kit, so expect some trial and error there.
+> **Status: honest warning.** The game source was written and checked on a PC; everything here was only ever compiled and run by the author on one Vita.
+> `pack_icons.py`, `pack_rgba.py` and `make_dlgfont.py` have **not** been tested by anyone. The included `CMakeLists.txt` is the author's own working file.
+> The hunter.bin build is documented in the header of `tools/convert_hunter.py`; the weapon / pistol / tint options of the author's own run are not recorded, so expect some trial and error there.
 
 ## Quick start (short version)
 
@@ -27,7 +27,7 @@ If the build stops with `vita-elf-create: Cannot allocate N bytes for SCE data .
 | Linux (a Steam Deck desktop works) | the scripts are bash + Python 3 |
 | [VitaSDK](https://vitasdk.org) with [vitaGL](https://github.com/Rinnegatamante/vitaGL) and vitashark built | `vdpm` can install them |
 | Python 3 with `Pillow` and `numpy` | `pip install pillow numpy` |
-| `ffmpeg` | sound conversion |
+| `pip install soundfile scipy numpy` (or `ffmpeg`) | sound conversion: `convert_sound.py` uses the Python packages for `.ogg` / `.wav` / `.flac` and falls back to ffmpeg for other formats or if the packages are missing. Three helper scripts that mix several clips (`make_gascut_audio.sh`, `make_hdintro_audio.sh`, `make_eileen_vo.sh`) still need `ffmpeg` |
 | The game's files exported with **FModel** | meshes as `.psk/.pskx`, animations `.psa`, maps as `.usda` + `.json`, textures as `.png`, keep the pak's folder names |
 | The game's `.pak` file | only for `extract_map_props.py` and `extract_volumes.py` |
 
@@ -143,7 +143,13 @@ To hand the data to other people, `make_release_data.sh SRC DEST` copies a worki
 
 ## 6. Known gaps
 
-* `hunter.bin`: `make_hunter.sh` was reconstructed from the finished file (the author's original command was not saved), so weapon and pistol placement may need small tweaks; `inspect_bin.py` prints a built file's header to compare.
+* `hunter.bin`: `make_hunter.sh` was reconstructed from the author's finished file (the original command was not saved). It reproduces the same textures, hat, 101 animations and index count. Known differences: the body texture comes out 128x128 from the game files (the author's copy was 256x256, edited by hand), and the vertex count is 1126 instead of 1246. Weapon and pistol placement use the converter's defaults, so check them in game. `inspect_bin.py` prints a built file's header and writes its animation names to a text file so two builds can be diffed.
 * The kart race was removed from the game; its scripts are left out.
 * `src/CMakeLists.txt` is the author's working file (VitaSDK + vitaGL + vitashark). If your VitaSDK names a library differently, change the `target_link_libraries` list.
 * The format of every `.bin` file is described in the header of the script that makes it, and each loader is in `main.c` (search the file name).
+
+## Messenger hats (insight shop)
+`tools/make_messenger.sh` now also packs five hats (Hunter's, Rumpled, Top, Steepled, Doll) into `messenger.bin`. The second messenger sells them for insight; the chosen hat is worn by every messenger. If a hat sits wrong, rebuild with `MHZ=<cm up> MHS=<size> MHX= MHY= ./make_messenger.sh` (default size 0.6).
+
+## Opening cutscene (new game and new game plus)
+`tools/make_intro.sh` builds `granter.bin`, `gi_chair.bin` and `snd/mus_gi1.wav` (Part 1 of the opening, Seq_GameIntroP1: the Contract Granter). Copy them to `ux0:data/bbpsx/` (the wav to `snd/`). START / X / O skips it; `intro_test.txt` plays it at every start, `nointro.txt` turns it off. The camera path is baked into `main.c` (made by `tools/gen_intro_cam.py`). Part 2 is not in yet.

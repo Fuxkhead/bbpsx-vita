@@ -158,6 +158,8 @@ def main():
     ap.add_argument('--tex', nargs='+', default=None, help='one or more folders with the PNG textures (T_HunterBody.png, t_sawcleaver.png, ...)')
     ap.add_argument('--texmap', default='MI_HunterFace=BbPSX_Head128v3,MI_HunterHair=t_hair,MI_HunterHeadPrev=T_HunterHead,MI_Cleaver=t_sawcleaver', help='MATERIAL=texturefile pairs (no .png) for materials whose texture is not named T_<material>')
     ap.add_argument('--hat', default=None, help='static mesh (.pskx) glued rigidly to the head bone')
+    ap.add_argument('--mhats', default=None, help='comma list of static hat meshes (.pskx) glued to the head bone as switchable hats: section flags 10,11,12... (the game draws only the worn one)')
+    ap.add_argument('--mhatoff', default='0,0,0', help='offset (cm, file space) added to every --mhats mesh after scaling'); ap.add_argument('--mhatscale', type=float, default=1.0, help='scale of every --mhats mesh, about its own origin')
     ap.add_argument('--hatoff', default='0,2,155.6', help='hat offset in file space cm (x,y,z) added to the hat mesh before attaching to the head')
     ap.add_argument('--tint', default='MI_HunterFace=225,184,158', help='MATERIAL=R,G,B (0-255; separate several with ;) recolours that material\'s texture to this average colour, keeping its light/dark detail; use --tint none to disable')
     ap.add_argument('--rootmotion', default='strip', choices=['strip', 'keep'], help='strip = remove horizontal root travel from animations (the game moves the player); keep = leave it')
@@ -196,6 +198,10 @@ def main():
         hm = load_psk(a.hat); hm['static'] = True
         hm['pts'] = hm['pts'] + np.array([float(x) for x in a.hatoff.split(',')], dtype=np.float32)
         meshes.append(hm); a.psk = list(a.psk) + [a.hat]
+    for hi_, hp_ in enumerate([x for x in (a.mhats or '').split(',') if x]):
+        hm = load_psk(hp_); hm['static'] = True; hm['mhat'] = hi_
+        hm['pts'] = hm['pts'] * a.mhatscale + np.array([float(x) for x in a.mhatoff.split(',')], dtype=np.float32)
+        meshes.append(hm); a.psk = list(a.psk) + [hp_]
     if a.weapon:
         wm = load_psk(a.weapon); wm['static'] = True; wm['bone'] = 'hand_r'; wm['weapon'] = True
         meshes.append(wm); a.psk = list(a.psk) + [a.weapon]
@@ -323,7 +329,7 @@ def main():
                     else:
                         i0, i1, i2 = (int(x) + vbase for x in f['w'])
                     idx += [i0, i2, i1]                      # reflection flips the winding
-                sections.append((start, len(idx) - start, mat_names.index(mname), (3 if mm.get('pistol2') else (2 if mm.get('pistol') else 0))))
+                sections.append((start, len(idx) - start, mat_names.index(mname), (3 if mm.get('pistol2') else (2 if mm.get('pistol') else (10 + mm['mhat'] if 'mhat' in mm else 0)))))
         if extra:
             vert_chunks.append(np.array(extra, dtype=verts.dtype)); nW += len(extra)
         vbase += nW

@@ -14,6 +14,7 @@ at = [d[p+i*16:p+i*16+16].split(b'\0')[0].decode('latin1') for i in range(nAt)];
 print('attach:', at)
 names = []
 for _ in range(nA):
-    nm = d[p:p+32].split(b'\0')[0].decode('latin1'); fps, nf = struct.unpack('<fI', d[p+32:p+40]); p += 40 + nf*(nB+nAt)*48
+    nm = d[p:p+32].split(b'\0')[0].decode('latin1'); fps, nf = struct.unpack('<fI', d[p+32:p+40]); p += 48 + nf*(nB+nAt)*48
     names.append('%s(%d@%g)' % (nm, nf, fps))
-print('first 25 anims:', names[:25]); print('total anims', len(names))
+print('total anims', len(names))
+open(sys.argv[1] + '.anims.txt', 'w').write('\n'.join(sorted(n.split('(')[0] for n in names)) + '\n'); print('names written to', sys.argv[1] + '.anims.txt')

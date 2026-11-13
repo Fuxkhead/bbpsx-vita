@@ -114,7 +114,8 @@ static float g_rain_v = -1.6f; static int g_rain_ld = 0;      // rain_fall: UV u
 #define NO_TEX 0xFFFF
 #define DEL_TEX 0xFFFD      // map_delete: a piece the texture editor deleted (texswap line "key part -2"): not drawn, no collision
 
-typedef struct { GLuint vbo, ibo; uint32_t nidx; float mn[3], mx[3]; float *cv; uint16_t *ci; uint32_t nv; } Geom;
+typedef struct { GLuint vbo, ibo; uint32_t nidx; float mn[3], mx[3]; float *cv; uint16_t *ci; uint32_t nv; uint8_t uvu; } Geom;      // uvu: 0 = not checked, 1 = its texture coordinates leave 0..1 (tiles), 2 = they stay inside 0..1 (one copy of the texture)
+static uint8_t *texClampNow;      // wrap_fix: per texture, 1 while it is set to clamp-to-edge
 typedef struct { uint32_t geom; uint16_t tex; } Part;
 typedef struct { uint16_t nparts; Part *parts; float bc[3], br; } Drawable;      // bc / br: bounding sphere (model space) used for culling
 typedef struct { uint32_t draw; float m[16]; } Instance;
@@ -253,7 +254,7 @@ static int load_level(const char *path) {
     texPan = calloc(nTex ? nTex : 1, 1);
     texAff = calloc(nTex ? nTex : 1, sizeof(float));
     texHasA = calloc(nTex ? nTex : 1, 1); texNm = calloc(nTex ? nTex : 1, 56);
-    glGenTextures(nTex, texs);
+    glGenTextures(nTex, texs); texClampNow = calloc(nTex ? nTex : 1, 1);
     for (uint32_t i = 0; i < nTex; i++) {
         if ((i & 31) == 31) { char t_[48]; snprintf(t_, sizeof t_, "texture %u", (unsigned)i); maplog("load: %s%s", t_, ""); }
         uint8_t nameLen = rd8();
@@ -712,7 +713,7 @@ static char g_stat_l[7][24], g_stat_v[7][40], g_sys_txt[32][32]; static int g_me
 #define INV_TABS 3
 #define INV_COLS 6
 #define SYS_N 15      // rows shown; SYS_MAP says which text slot / action each one is (vertex snap, left handed and the door tint rows were taken off the menu)
-static const int SYS_MAP[SYS_N] = { 0, 8, 16, 18, 19, 20, 21, 22, 23, 24, 27, 28, 29, 31, 17 };      // the debug rows (free cam, panel editor, texture editor, the Gehrman fight trigger) are off the menu; their code is still there
+static const int SYS_MAP[SYS_N] = { 0, 8, 16, 18, 19, 20, 21, 22, 23, 24, 27, 28, 29, 31, 17 };      // the map editor (texture editor, row 30) is off the menu again; the other debug rows (free cam, panel editor, the Gehrman fight trigger) are off; their code is still there
 static const char *INV_TAB_NAME[INV_TABS] = { "ITEMS", "KEY ITEMS", "MATERIALS" };
 typedef struct { char key[24]; char label[28]; int cat, n, kind; } InvRow;           // kind 0 = an entry of g_inv, 1 = blood vials, 2 = quicksilver bullets (their counts live in the game loop), 3 = "empty the slot"
 static void quick_ready(void) { if (g_quick_ready) return; g_quick_ready = 1; memset(g_quick, 0, sizeof g_quick); g_quick_sel = 0; }
@@ -772,12 +773,15 @@ static const InsItem INS_ITEMS[] = {      // ins_shop: the second messenger in t
     { "", "HENRYK GARB", 12, 0, 3, 5, 2 },
     { "ColdbloodDew1", "COLDBLOOD DEW 1", 1, 1, 0, 0, 0 }, { "ColdbloodDew2", "COLDBLOOD DEW 2", 2, 1, 0, 0, 0 }, { "ColdbloodDew3", "COLDBLOOD DEW 3", 4, 1, 0, 0, 0 },
     { "ThickColdblood5", "THICK COLDBLOOD 5", 8, 1, 0, 0, 0 }, { "ThickColdblood6", "THICK COLDBLOOD 6", 15, 1, 0, 0, 0 },
-    { "HuntersMarkBold", "HUNTERS MARK", 5, 1, 0, 0, 0 } };      // the Coldblood items give echoes when used, but cost insight here
-#define INS_N 18
+    { "HuntersMarkBold", "HUNTERS MARK", 5, 1, 0, 0, 0 },
+    { "", "MESSENGER NO HAT", 0, 0, 4, 0, 0 }, { "", "MESSENGER HUNTERS HAT", 1, 0, 4, 1, 0 }, { "", "MESSENGER RUMPLED HAT", 1, 0, 4, 2, 0 }, { "", "MESSENGER TOP HAT", 2, 0, 4, 3, 0 }, { "", "MESSENGER STEEPLED HAT", 2, 0, 4, 4, 0 }, { "", "MESSENGER DOLL HAT", 2, 0, 4, 5, 0 } };      // kind 4: a hat for every messenger (a = 1..5, 0 takes it off); the worn one is g_mhat, the bought ones are bits of g_mhat_own      // the Coldblood items give echoes when used, but cost insight here
+#define INS_N 24
+static int g_mhat = 0, g_mhat_own = 0;      // messenger_hats: the hat every messenger wears (0 none, 1 hunters, 2 rumpled, 3 top, 4 steepled, 5 doll) and the bought ones (bit a); saved
 static int g_ins = 0; static float g_ishop_x = 1e6f, g_ishop_y = 1e6f;      // g_ins: the open shop is the insight shop
 static int g_shop_ui, g_shop_sel, g_shop_who = -1, g_shop_held[10], g_up_ui, g_up_sel, g_up_who = -1, g_gehr_talk;      // shop_ui: the messengers' shop; up_ui: Gehrman's menu (1) / the weapon upgrade list (2)
 static int g_slot = 0;      // save slots: 0 uses save.bin / lastpos.txt (older saves keep working), 1 and 2 use save_2.bin / save_3.bin and lastpos_2.txt / lastpos_3.txt
 static void slot_file(char *b, size_t n, const char *base, const char *ext, int slot) { if (!slot) snprintf(b, n, "ux0:data/bbpsx/%s.%s", base, ext); else snprintf(b, n, "ux0:data/bbpsx/%s_%d.%s", base, slot + 1, ext); }
+static int g_intro_new = 0;      // gi_intro: no save in this slot (a new hunter): the opening cutscene plays
 static int g_ng = 0, g_ng_wipe = 0, g_ng_conf = 0, g_ngp_go = 0;      // new game plus: how many cycles you have finished (saved), a wipe is in progress (mstate_save does nothing), the menu row waits for a second press
 static float ng_hpm(void) { return 1.0f + 0.5f * (g_ng > 8 ? 8 : g_ng); }      // enemy health (and echo reward) multiplier: +50% per cycle
 static int g_si_boss[3];      // bosses_needed: per save slot, how many of the four bosses that hunter has defeated (read by the title menu)
@@ -846,7 +850,7 @@ static int att_stocked(int slot, int k) {      // attire_shop: what the messenge
 }
 static int badge_have(void);
 static int ins_ok(int i) { const InsItem *t = &INS_ITEMS[i]; if (t->b == 4 && !badge_have()) return 0; if (t->kind == 2) return g_att_has[0][t->a]; if (t->kind == 3) return g_att_has[1][t->a]; return t->b == 0 || t->b == 4 || (t->b == 1 && g_eileen_met) || (t->b == 2 && g_arena_done) || (t->b == 3 && (g_gas_dead || g_cb_dead)); }
-static int ins_own(int i) { const InsItem *t = &INS_ITEMS[i]; return t->kind == 1 ? (g_wown[t->a] || g_wstore[t->a]) : (t->kind == 2 ? (g_att_own[0][t->a] || g_astore[0][t->a]) : (t->kind == 3 ? (g_att_own[1][t->a] || g_astore[1][t->a]) : 0)); }
+static int ins_own(int i) { const InsItem *t = &INS_ITEMS[i]; if (t->kind == 4) return t->a > 0 && ((g_mhat_own >> t->a) & 1); return t->kind == 1 ? (g_wown[t->a] || g_wstore[t->a]) : (t->kind == 2 ? (g_att_own[0][t->a] || g_astore[0][t->a]) : (t->kind == 3 ? (g_att_own[1][t->a] || g_astore[1][t->a]) : 0)); }
 static int shop_items(int *ids) {
     if (g_ins) { int n = 0; for (int i = 0; i < INS_N; i++) if (ins_ok(i)) ids[n++] = 400 + i; ids[n++] = -1; return n; }      // 0 blood vial, 1 quicksilver bullet, 100+w a weapon, 200+k a hat, 300+k a garb, -1 leave
     int n = 0;
@@ -1455,7 +1459,7 @@ static int load_hunter(const char *path) {
     H.tmp = malloc(per * sizeof(float));
     H.wbone = -1;
     if (H.nS >= 2) {                                   // the weapon is the last section: find its two far ends (blade tip / pommel)
-        uint32_t wi = H.nS - 1; while (wi > 0 && (H.sec[wi].flag == 2 || H.sec[wi].flag == 3)) wi--;          // skip the pistol section
+        uint32_t wi = H.nS - 1; while (wi > 0 && (H.sec[wi].flag == 2 || H.sec[wi].flag == 3 || (H.sec[wi].flag >= 10 && H.sec[wi].flag <= 14))) wi--;          // skip the pistol section
         const HSection *ws = &H.sec[wi];
         float c[3] = { 0, 0, 0 }; uint32_t n = ws->count;
         for (uint32_t i = 0; i < n; i++) { const float *r = &H.rest[H.idx[ws->start + i] * 5]; c[0] += r[0]; c[1] += r[1]; c[2] += r[2]; }
@@ -8765,7 +8769,7 @@ static void draw_hud(float hpf, float stf, float dt, int vials, int bullets, int
             int cost_ = id_ >= 0 && id_ < 10 ? SHOP_COST[id_] : (id_ == 1 ? SHOP_COST[1] : (id_ >= 300 ? ATT_PRICE[1][id_ - 300] : (id_ >= 200 ? ATT_PRICE[0][id_ - 200] : (id_ >= 100 ? WPN_PRICE[id_ - 100] : 0))));
             if (sel) { glDisable(GL_TEXTURE_2D); mn_bar((px - 14) * hud_k, (y - 10) * hud_k, (gw + 28) * hud_k, 40.0f * hud_k); }
             float cr = sel ? 1.0f : 0.68f, cg = sel ? 0.95f : 0.66f, cb = sel ? 0.8f : 0.58f;
-            if (id_ >= 400 || (g_ins && id_ < 0)) { if (id_ < 0) mn_fa("LEAVE", px + 8, y, 22.0f, cr, cg, cb, 1.0f, 1); else { const InsItem *ii_ = &INS_ITEMS[id_ - 400]; int can_ = g_insight >= ii_->cost && !ins_own(id_ - 400); mn_fa(ii_->label, px + 8, y, 20.0f, cr, cg, cb, 1.0f, 1); if (ins_own(id_ - 400)) snprintf(b_, sizeof b_, "OWNED"); else snprintf(b_, sizeof b_, "%d", ii_->cost); float vw = mn_fa(b_, 0, 0, 20.0f, 0, 0, 0, 0, 0); mn_fa(b_, px + gw - vw, y + 2, 20.0f, can_ ? cr : 0.9f, can_ ? cg : 0.4f, can_ ? cb : 0.35f, 1.0f, 1); } continue; }
+            if (id_ >= 400 || (g_ins && id_ < 0)) { if (id_ < 0) mn_fa("LEAVE", px + 8, y, 22.0f, cr, cg, cb, 1.0f, 1); else { const InsItem *ii_ = &INS_ITEMS[id_ - 400]; int can_ = g_insight >= ii_->cost && (!ins_own(id_ - 400) || ii_->kind == 4); mn_fa(ii_->label, px + 8, y, 20.0f, cr, cg, cb, 1.0f, 1); if (ii_->kind == 4) { if (ii_->a == g_mhat) snprintf(b_, sizeof b_, "WORN"); else if (ii_->a == 0 || ins_own(id_ - 400)) snprintf(b_, sizeof b_, "WEAR"); else snprintf(b_, sizeof b_, "%d", ii_->cost); } else if (ins_own(id_ - 400)) snprintf(b_, sizeof b_, "OWNED"); else snprintf(b_, sizeof b_, "%d", ii_->cost); float vw = mn_fa(b_, 0, 0, 20.0f, 0, 0, 0, 0, 0); mn_fa(b_, px + gw - vw, y + 2, 20.0f, can_ ? cr : 0.9f, can_ ? cg : 0.4f, can_ ? cb : 0.35f, 1.0f, 1); } continue; }
             mn_fa(id_ == 0 ? "BLOOD VIAL" : (id_ == 1 ? "QUICKSILVER BULLET" : (id_ == 2 ? "ANTIDOTE" : (id_ == 3 ? "SEDATIVE" : (id_ == 4 ? "PEBBLES X5" : (id_ == 5 ? "MOLOTOV COCKTAIL" : (id_ == 6 ? "FIRE PAPER" : (id_ == 7 ? "BOLT PAPER" : (id_ == 8 ? "THROWING KNIFE" : (id_ == 9 ? "HUNTERS MARK" : (id_ < 0 ? "LEAVE" : (id_ >= 300 ? ATT_BODY_N[id_ - 300] : (id_ >= 200 ? ATT_HAT_N[id_ - 200] : WPN[id_ - 100].name)))))))))))), px + (id_ >= 0 ? 50 : 8), y, 22.0f, cr, cg, cb, 1.0f, 1);
             if (id_ >= 0) ic_shop(id_, px + 6, y - 7, 36);      // shop_icons
             if (id_ >= 0) { if (id_ < 10) snprintf(b_, sizeof b_, "HELD %d   %d", g_shop_held[id_], cost_); else if (own_) snprintf(b_, sizeof b_, "OWNED"); else if (g_gift || (id_ >= 100 && id_ < 200 && cost_ == 0)) snprintf(b_, sizeof b_, "FREE"); else snprintf(b_, sizeof b_, "%d", cost_); float vw = mn_fa(b_, 0, 0, 20.0f, 0, 0, 0, 0, 0); int can_ = id_ >= 100 ? (!own_ && (g_gift || echoes >= cost_)) : echoes >= cost_; mn_fa(b_, px + gw - vw, y + 2, 20.0f, can_ ? cr : 0.9f, can_ ? cg : 0.4f, can_ ? cb : 0.35f, 1.0f, 1); } }
@@ -9065,6 +9069,7 @@ static float dz(int v) {                       // stick 0..255 -> -1..1 with dea
 
 
 // Draws the posed Hunter with the PS1 shader. pv = projection * view (column-major).
+static int g_in_chair = 0;      // gi_intro: drawing the wheelchair (the camera rig's own mesh is skipped)
 static void draw_hunter_ps1(const PS1Shader *sh, const float *pv, float x, float y, float z, float face) {
     float c = cosf(face), s = sinf(face), my_ = (CUR == &HUNT && g_lefty) ? -1.0f : 1.0f;      // left_hand: the model's side axis is flipped
     float model[16] = { c, s, 0, 0,  -s * my_, c * my_, 0, 0,  0, 0, 1, 0,  x, y, z, 1 };
@@ -9078,7 +9083,9 @@ static void draw_hunter_ps1(const PS1Shader *sh, const float *pv, float x, float
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, H.skinned);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (const char *)H.skinned + 12);
     for (uint32_t i = 0; i < H.nS; i++) {
+        if (g_in_chair && H.sec[i].flag == 0) continue;
         if (H.sec[i].flag == 3 && !H.show_alt) continue;      // note_open: a messenger's open note
+        if (H.sec[i].flag >= 10 && H.sec[i].flag <= 14 && g_mhat != (int)H.sec[i].flag - 9) continue;      // messenger_hats: only the worn hat
         if (H.sec[i].flag == 2 && (H.show_alt || !H.show_pistol || (CUR == &HUNT && (wpn_l() != 5 || g_pistol_ext)))) continue;      // the pistol: only while firing, and only when it is the left-hand weapon
         if (H.hide_w && (int)i >= H.wsec_lo && (int)i <= H.wsec_i) continue;
         if (i == 0 && CUR == &HUNT && g_att[1] > 0 && g_att_has[1][g_att[1]]) continue;
@@ -9104,6 +9111,7 @@ static void draw_hunter_ps1_part(const PS1Shader *sh, const float *pv, float x, 
     static uint16_t tmp[60000];
     for (uint32_t i = 0; i < H.nS; i++) {
         if (H.sec[i].flag == 3 && !H.show_alt) continue;      // note_open: a messenger's open note
+        if (H.sec[i].flag >= 10 && H.sec[i].flag <= 14 && g_mhat != (int)H.sec[i].flag - 9) continue;      // messenger_hats: only the worn hat
         if (H.sec[i].flag == 2 && (H.show_alt || !H.show_pistol || (CUR == &HUNT && (wpn_l() != 5 || g_pistol_ext)))) continue;      // the pistol: only while firing, and only when it is the left-hand weapon
         if (H.hide_w && (int)i >= H.wsec_lo && (int)i <= H.wsec_i) continue;
         if (i == 0 && CUR == &HUNT && g_att[1] > 0 && g_att_has[1][g_att[1]]) continue;
@@ -9136,6 +9144,7 @@ static void draw_hunter_ffp(float x, float y, float z, float face) {
     glTexCoordPointer(2, GL_FLOAT, 20, (const char *)H.skinned + 12);
     for (uint32_t i = 0; i < H.nS; i++) {
         if (H.sec[i].flag == 3 && !H.show_alt) continue;      // note_open: a messenger's open note
+        if (H.sec[i].flag >= 10 && H.sec[i].flag <= 14 && g_mhat != (int)H.sec[i].flag - 9) continue;      // messenger_hats: only the worn hat
         if (H.sec[i].flag == 2 && (H.show_alt || !H.show_pistol || (CUR == &HUNT && (wpn_l() != 5 || g_pistol_ext)))) continue;      // the pistol: only while firing, and only when it is the left-hand weapon
         if (H.hide_w && (int)i >= H.wsec_lo && (int)i <= H.wsec_i) continue;
         if (i == 0 && CUR == &HUNT && g_att[1] > 0 && g_att_has[1][g_att[1]]) continue;
@@ -10877,6 +10886,8 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
         else if (EN.leave == 1) { EN.lv_t += dt; if (EN.a_stepL < 0 || EN.lv_t >= en_len(EN.a_stepL)) { EN.leave = 2; EN.a_idle = hold_; } }
         else if (EN.leave == 2) { EN.a_idle = hold_; if (md_ > 5.0f || gm_) { if (EN.a_stepR >= 0) { EN.leave = 3; EN.lv_t = 0.0f; EN.a_idle = EN.a_stepR; en_play(EN.a_stepR, 0.05f, 1); } else EN.leave = 0; } }
         else if (EN.leave == 3) { EN.lv_t += dt; if (EN.a_stepR < 0 || EN.lv_t >= en_len(EN.a_stepR)) { EN.leave = 0; return 0.0f; } }
+        { float I_ = 0.0f; if (EN.leave == 1) { float L_ = EN.a_stepL >= 0 ? en_len(EN.a_stepL) : 0.5f; I_ = fminf(1.0f, EN.lv_t / fmaxf(L_, 0.1f)); } else if (EN.leave == 2) I_ = 1.0f; else if (EN.leave == 3) { float L_ = EN.a_stepR >= 0 ? en_len(EN.a_stepR) : 0.5f; I_ = 1.0f - fminf(1.0f, EN.lv_t / fmaxf(L_, 0.1f)); }
+          if (I_ > 0.03f) glow_add_c(EN.p.x, EN.p.y, EN.p.z + 0.4f, 0.9f * I_, 2); }      // msg_glow: a small white glow grows as a messenger pops out of the ground, stays while it stands, and shrinks away as it goes back in
         if (EN.leave >= 1) turn_to(&EN.face, atan2f(pl->y - EN.p.y, pl->x - EN.p.x), 4.0f * dt);      // they watch you move
     }
     if (EN.type == 21) EN.a_idle = (g_doll_ui == 2 && EN.a_fight >= 0) ? EN.a_fight : EN.a_walk;      // doll_level: she kneels while she channels
@@ -11374,6 +11385,9 @@ static const char *const TSW_DEF[][2] = {
       "-1 1 0\n"
       "43 4 15\n"
       "43 3 14\n"
+      "43 5 -1 backstreets t_railtrim1.png\n"
+      "43 1 13\n"
+      "43 0 16\n"
     },
     { "sewershortcut",
       "293 0 14\n"
@@ -13136,7 +13150,7 @@ static void maplog(const char *fmt, const char *a, const char *b) {      // log_
 static int file_exists_(const char *p) { FILE *f = fopen(p, "rb"); if (!f) return 0; fclose(f); return 1; }
 // ---- static batching: every instance that never moves is baked (once per level) into world-space chunks, one per 10 m cell and texture.
 //      A frame then costs one draw per visible chunk instead of one per instance part, and the matrix uniform is just projection*view.
-typedef struct { GLuint vbo, ibo; uint32_t nidx; int tex; float bc[3], br; } Chunk;
+typedef struct { GLuint vbo, ibo; uint32_t nidx; int tex; float bc[3], br; uint8_t clamp; } Chunk;      // clamp: wrap_fix: the pieces in this chunk show their texture once, so it is drawn clamped to its edge
 static Chunk *chunks; static int nChunks; static uint8_t *instDyn; static int batched;
 // ---- texture_editor: free cam, aim and press TRIANGLE to pick a piece of the level, D-pad left / right flicks through the textures this map uses; kept per map in ux0:data/bbpsx/texswap_<map>.txt
 typedef struct { int key, part, tex; } TexSwap;      // key >= 0: that one instance; key < 0: every instance of drawable (-key - 1)
@@ -13285,17 +13299,18 @@ static void ts_reset(void) {
     if (g_te_inst < 0 || g_te_inst >= (int)nInst) return;
     ts_del(g_te_inst, g_te_part); ts_del(-(int)insts[g_te_inst].draw - 1, g_te_part); g_te_dirty = 1; g_te_t = 0.2f;
 }
-typedef struct { int cx, cy, cz, tex; float *v; uint32_t nv, cap; uint16_t *ix; uint32_t ni, icap; } Bld;
+typedef struct { int cx, cy, cz, tex, clamp; float *v; uint32_t nv, cap; uint16_t *ix; uint32_t ni, icap; } Bld;
+static int g_bld_clamp, g_nowrap_fix = -1;      // wrap_fix: g_bld_clamp = the part being baked wants a clamped texture; nowrapfix.txt in the data folder turns the fix off
 static Bld *blds; static int nBld, capBld; static int bhash[8192];
 #define BAKE_CELL 10.0f
 static Bld *bld_get(int cx, int cy, int cz, int tex, uint32_t need) {
-    uint32_t h = ((uint32_t)cx * 73856093u) ^ ((uint32_t)cy * 19349663u) ^ ((uint32_t)cz * 83492791u) ^ ((uint32_t)(tex + 2) * 2654435761u);
+    uint32_t h = ((uint32_t)cx * 73856093u) ^ ((uint32_t)cy * 19349663u) ^ ((uint32_t)cz * 83492791u) ^ ((uint32_t)(tex + 2) * 2654435761u) ^ ((uint32_t)g_bld_clamp * 40503u);
     h &= 8191;
     for (;;) {
         int b = bhash[h];
         if (b == 0) break;
         Bld *B = &blds[b - 1];
-        if (B->cx == cx && B->cy == cy && B->cz == cz && B->tex == tex) {
+        if (B->cx == cx && B->cy == cy && B->cz == cz && B->tex == tex && B->clamp == g_bld_clamp) {
             if (B->nv + need <= 65000) return B;
             break;                                                    // full: start a fresh one in this slot
         }
@@ -13303,7 +13318,7 @@ static Bld *bld_get(int cx, int cy, int cz, int tex, uint32_t need) {
     }
     if (g_bake_oom) { static Bld dummy_; return &dummy_; }
     if (nBld == capBld) { int nc = capBld ? capBld * 2 : 256; Bld *nb = realloc(blds, nc * sizeof(Bld)); if (!nb) { g_bake_oom = 1; static Bld dummy2_; return &dummy2_; } blds = nb; capBld = nc; }
-    Bld *B = &blds[nBld]; memset(B, 0, sizeof *B); B->cx = cx; B->cy = cy; B->cz = cz; B->tex = tex;
+    Bld *B = &blds[nBld]; memset(B, 0, sizeof *B); B->cx = cx; B->cy = cy; B->cz = cz; B->tex = tex; B->clamp = g_bld_clamp;
     bhash[h] = ++nBld;
     return B;
 }
@@ -13353,7 +13368,7 @@ static void bld_idx(Bld *B, uint32_t i) {
     B->ix[B->ni++] = (uint16_t)i;
 }
 static int chunk_slow(const Chunk *c) { return c->tex >= 0 && ((texHasA && texHasA[c->tex]) || texAff[c->tex] > 0.0f); }      // opaque_fast: needs the full shader
-static int chunk_cmp(const void *a, const void *b) { int sa = chunk_slow((const Chunk *)a), sb = chunk_slow((const Chunk *)b); if (sa != sb) return sa - sb; return ((const Chunk *)a)->tex - ((const Chunk *)b)->tex; }
+static int chunk_cmp(const void *a, const void *b) { int sa = chunk_slow((const Chunk *)a), sb = chunk_slow((const Chunk *)b); if (sa != sb) return sa - sb; if (((const Chunk *)a)->tex != ((const Chunk *)b)->tex) return ((const Chunk *)a)->tex - ((const Chunk *)b)->tex; return (int)((const Chunk *)a)->clamp - (int)((const Chunk *)b)->clamp; }
 static void bake_static(void) {
     batched = 1; g_bake_oom = 0; heap_log("bake start");
     { g_nudge = 0.0f; { FILE *nf2_ = fopen("ux0:data/bbpsx/nudge.txt", "r"); if (nf2_) { float mm_ = 0.0f; if (fscanf(nf2_, "%f", &mm_) == 1 && fabsf(mm_) <= 20.0f) g_nudge = mm_ * 0.001f; fclose(nf2_); } } g_grow = 0.005f; FILE *gf_ = fopen("ux0:data/bbpsx/grow.txt", "r"); if (gf_) { float mm_ = 5.0f; if (fscanf(gf_, "%f", &mm_) == 1) g_grow = mm_ * 0.001f; fclose(gf_); } if (g_grow < 0.0f) g_grow = 0.0f; if (g_grow > 0.05f) g_grow = 0.05f; }      // crack_grow
@@ -13407,6 +13422,13 @@ static void bake_static(void) {
             }
             int ptx_ = part_tex(i, p, pt); if (ptx_ == DEL_TEX) { del_part_collision(m, g); continue; }      // map_delete
             int tex = ptx_ == NO_TEX ? -1 : ptx_;
+            if (g_nowrap_fix < 0) { g_nowrap_fix = file_exists_("ux0:data/bbpsx/nowrapfix.txt") ? 0 : 1; maplog("wrap_fix: %s%s", g_nowrap_fix ? "on" : "off (nowrapfix.txt)", ""); }
+            g_bld_clamp = 0;
+            if (g_nowrap_fix && tex >= 0 && !texPan[tex] && texAff[tex] <= 0.0f) {      // wrap_fix: a piece whose texture coordinates stay inside 0..1 shows the texture once: clamp it
+                Geom *gm_ = (Geom *)g;
+                if (!gm_->uvu) { int in_ = gm_->nv > 0 ? 1 : 0; for (uint32_t v_ = 0; v_ < gm_->nv && in_; v_++) { float u_ = gm_->cv[(size_t)v_ * 5 + 3], w_ = gm_->cv[(size_t)v_ * 5 + 4]; if (u_ < -0.002f || u_ > 1.002f || w_ < -0.002f || w_ > 1.002f) in_ = 0; } gm_->uvu = in_ ? 2 : 1; }
+                g_bld_clamp = gm_->uvu == 2;
+            }
             if (!big && g->nv < 20000 && !(g_grow > 0.0f && g->nidx > 30000)) {
                 if (g_grow > 0.0f) {      // crack_grow: unshared, slightly grown triangles
                     Bld *B = bld_get((int)floorf(cx / BAKE_CELL), (int)floorf(cy / BAKE_CELL), (int)floorf(cz / BAKE_CELL), tex, g->nidx);
@@ -13436,12 +13458,13 @@ static void bake_static(void) {
             }
         }
     }
+    g_bld_clamp = 0;
     heap_log("bake merged"); if (g_bake_oom) maplog("bake: OUT OF MEMORY, the world is incomplete%s%s", "", "");
     TR("bake: instances merged"); chunks = calloc(nBld ? nBld : 1, sizeof(Chunk)); nChunks = 0;
     for (int b = 0; b < nBld; b++) {
         Bld *B = &blds[b];
         if (B->ni && chunks) {
-            Chunk *C = &chunks[nChunks++]; C->tex = B->tex; C->nidx = B->ni;
+            Chunk *C = &chunks[nChunks++]; C->tex = B->tex; C->clamp = (uint8_t)B->clamp; C->nidx = B->ni;
             float mn[3] = { 1e30f, 1e30f, 1e30f }, mx[3] = { -1e30f, -1e30f, -1e30f };
             for (uint32_t v = 0; v < B->nv; v++) for (int k = 0; k < 3; k++) { float f = B->v[v * 5 + k]; if (f < mn[k]) mn[k] = f; if (f > mx[k]) mx[k] = f; }
             for (int k = 0; k < 3; k++) C->bc[k] = 0.5f * (mn[k] + mx[k]);
@@ -13617,7 +13640,7 @@ static void level_unload(void) {
     for (uint32_t i = 0; i < nGeom && geoms; i++) { glDeleteBuffers(1, &geoms[i].vbo); glDeleteBuffers(1, &geoms[i].ibo); free(geoms[i].cv); free(geoms[i].ci); }
     free(geoms); geoms = NULL; nGeom = 0;
     if (texs) glDeleteTextures(nTex, texs);
-    free(texNm); texNm = NULL; cat_free(); free(texs); free(texPan); free(texAff); free(texHasA); texHasA = NULL; texs = NULL; texPan = NULL; texAff = NULL; nTex = 0;
+    free(texNm); texNm = NULL; cat_free(); free(texClampNow); texClampNow = NULL; free(texs); free(texPan); free(texAff); free(texHasA); texHasA = NULL; texs = NULL; texPan = NULL; texAff = NULL; nTex = 0;
     for (uint32_t i = 0; i < nDraw && draws; i++) free(draws[i].parts);
     free(draws); draws = NULL; nDraw = 0;
     free(insts); insts = NULL; nInst = 0;
@@ -13885,6 +13908,11 @@ static void setup_enemies(void) {                 // (re)build the enemy list fr
         float ox_ = 0.3052f * cosf(iyw_) + 0.0089f * sinf(iyw_), oy_ = 0.3052f * sinf(iyw_) - 0.0089f * cosf(iyw_);
         ENS[n_en].type = 23; ENS[n_en].dl_mode = 0; ENS[n_en].fixed = 1; ENS[n_en].hx = ix_ + ox_; ENS[n_en].hy = iy_ + oy_; ENS[n_en].hz = iz_ + 1.0088f; ENS[n_en].hyaw = iyw_; g_ishop_x = ENS[n_en].hx; g_ishop_y = ENS[n_en].hy; n_en++;
         { char t_[96]; snprintf(t_, sizeof t_, "ins_shop: messenger at %.2f %.2f %.2f", ix_, iy_, iz_); maplog("%s%s", t_, ""); } }
+    if (!strcasecmp(cur_map, "huntersdream") && en_have[23] && n_en < MAX_ENEMIES) {      // tomb_msg: a messenger on the slab in front of the tombstone that takes you out of the Dream; tomb_messenger.txt = x y z yaw to move it
+        float mx_ = 0.124f, my_ = -7.289f, mz_ = 0.152f, myw_ = 0.3450f;      /* just in front of where the hunter stood at the tombstone (lastpos 0.877 -7.018 0.152, facing 3.4866), turned back toward them */
+        FILE *fm_ = fopen("ux0:data/bbpsx/tomb_messenger.txt", "r"); if (fm_) { float a_, b_, c_, d_; if (fscanf(fm_, "%f %f %f %f", &a_, &b_, &c_, &d_) == 4) { mx_ = a_; my_ = b_; mz_ = c_; myw_ = d_; } fclose(fm_); }
+        ENS[n_en].type = 23; ENS[n_en].dl_mode = 0; ENS[n_en].fixed = 1; ENS[n_en].hx = mx_; ENS[n_en].hy = my_; ENS[n_en].hz = mz_; ENS[n_en].hyaw = myw_; n_en++;
+        { char t_[96]; snprintf(t_, sizeof t_, "tomb_msg: messenger at %.2f %.2f %.2f", mx_, my_, mz_); maplog("%s%s", t_, ""); } }
     if (!strcasecmp(cur_map, "huntersdream") && en_have[22] && !(GH_ALIVE && GH_READY && gh_ok)) for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 25) {      // gehrman_npc: Gehrman waits in the Hunter's Dream
         ENS[n_en].type = 22; ENS[n_en].fixed = 1; ENS[n_en].hx = spawns[i].x; ENS[n_en].hy = spawns[i].y; ENS[n_en].hz = spawns[i].z; ENS[n_en].hyaw = spawns[i].yaw;
         if (!file_exists_("ux0:data/bbpsx/npc_spawn.txt")) { float gz_ = 0.0f; ENS[n_en].hx = 19.8f; ENS[n_en].hy = -11.2f; ENS[n_en].hz = cw_floor(&world, 19.8f, -11.2f, 3.0f, &gz_) ? gz_ : ENS[n_en].hz; { char t_[80]; snprintf(t_, sizeof t_, "npc_glow: Gehrman at 19.8 -11.2 z %.2f", ENS[n_en].hz); maplog("%s%s", t_, ""); } }      // npc_glow: the glow marker under him in the Dream
@@ -14003,10 +14031,10 @@ static void mstate_restore(void) {
     for (int i = 0; i < nPicks && i < m->np; i++) picks[i].taken = m->ptaken[i];
 }
 // save.bin: the per-map memory above, written to the Vita so doors, kills and pickups survive quitting. Enemies and items only come back from dying or resting at a lamp.
-typedef struct { int echoes; EchoDrop drop; char lamp_map[40]; float lx, ly, lz; int lamp_set; int gas_dead; InvSlot inv[MAX_INV]; char quick[6][24]; int quick_sel; int eq[4], eq_r, eq_l, eq_set; int att[2], att_set; int eileen_met; int arena_done; int eil_state; int stats[5]; int doll_met; int wlv[12]; int gil_gone; int wown[12]; int attown[2][10]; int doll_hi; int hd_done; char litmap[128][32]; float litx[128], lity[128]; int lit_n; int dream_seen; int vb_set, vials_s, bullets_s, gift_s[2]; int sick_open; int insight; int redo_gas, redo_cb; int gb_dead; int gh_dead; int gh_redo; int gb_redo; int cb_dead; int arcane; int ng; int wstore[12]; int astore[2][10]; InvSlot istore[MAX_INV]; } EchoSave;     // new fields go last: older saves are a prefix
+typedef struct { int echoes; EchoDrop drop; char lamp_map[40]; float lx, ly, lz; int lamp_set; int gas_dead; InvSlot inv[MAX_INV]; char quick[6][24]; int quick_sel; int eq[4], eq_r, eq_l, eq_set; int att[2], att_set; int eileen_met; int arena_done; int eil_state; int stats[5]; int doll_met; int wlv[12]; int gil_gone; int wown[12]; int attown[2][10]; int doll_hi; int hd_done; char litmap[128][32]; float litx[128], lity[128]; int lit_n; int dream_seen; int vb_set, vials_s, bullets_s, gift_s[2]; int sick_open; int insight; int redo_gas, redo_cb; int gb_dead; int gh_dead; int gh_redo; int gb_redo; int cb_dead; int arcane; int ng; int wstore[12]; int astore[2][10]; InvSlot istore[MAX_INV]; int mhat, mhat_own; } EchoSave;     // new fields go last: older saves are a prefix
 static MapState last_written[MAX_MAPS]; static EchoSave last_es; static int have_last;
 static void save_write(int force) {
-    EchoSave es; memset(&es, 0, sizeof es); quick_ready(); memcpy(es.inv, g_inv, sizeof es.inv); memcpy(es.quick, g_quick, sizeof es.quick); es.quick_sel = g_quick_sel; memcpy(es.eq, g_eq, sizeof es.eq); es.eq_r = g_eq_r; es.eq_l = g_eq_l; es.eq_set = 1; memcpy(es.wstore, g_wstore, sizeof es.wstore); memcpy(es.astore, g_astore, sizeof es.astore); memcpy(es.istore, g_istore, sizeof es.istore); es.att[0] = g_att[0]; es.att[1] = g_att[1]; es.att_set = 1; es.echoes = g_echoes; es.drop = g_drop; snprintf(es.lamp_map, sizeof es.lamp_map, "%s", g_lamp_map); es.lx = g_lamp_x; es.ly = g_lamp_y; es.lz = g_lamp_z; es.lamp_set = g_lamp_set; es.gas_dead = g_gas_dead; es.eileen_met = g_eileen_met; es.arena_done = g_arena_done; es.eil_state = g_eil_state; memcpy(es.stats, g_stat, sizeof es.stats); es.arcane = g_stat[5]; es.ng = g_ng; es.doll_met = g_doll_met; memcpy(es.wlv, g_wlv, sizeof g_wlv); es.gil_gone = g_gil_gone; memcpy(es.wown, g_wown, sizeof g_wown); memcpy(es.attown, g_att_own, sizeof g_att_own); es.doll_hi = g_doll_hi; es.hd_done = g_hd_done; memcpy(es.litmap, g_lit_map, sizeof g_lit_map); memcpy(es.litx, g_lit_x, sizeof g_lit_x); memcpy(es.lity, g_lit_y, sizeof g_lit_y); es.lit_n = g_lit_n; es.dream_seen = g_dream_seen; es.vb_set = 1; es.vials_s = g_cur_vials >= 0 ? g_cur_vials : g_start_vials; es.bullets_s = g_cur_bullets >= 0 ? g_cur_bullets : g_start_bullets; es.gift_s[0] = g_gift_taken[0]; es.gift_s[1] = g_gift_taken[1]; es.sick_open = g_sick_open; es.insight = g_insight; es.redo_gas = g_gas_redo; es.redo_cb = g_cb_redo; es.gb_dead = g_gb_dead; es.gh_dead = g_gh_dead; es.gh_redo = g_gh_redo; es.gb_redo = g_gb_redo; es.cb_dead = g_cb_dead;      // cb_saved: the Cleric Beast stays dead after quitting
+    EchoSave es; memset(&es, 0, sizeof es); quick_ready(); memcpy(es.inv, g_inv, sizeof es.inv); memcpy(es.quick, g_quick, sizeof es.quick); es.quick_sel = g_quick_sel; memcpy(es.eq, g_eq, sizeof es.eq); es.eq_r = g_eq_r; es.eq_l = g_eq_l; es.eq_set = 1; memcpy(es.wstore, g_wstore, sizeof es.wstore); memcpy(es.astore, g_astore, sizeof es.astore); memcpy(es.istore, g_istore, sizeof es.istore); es.mhat = g_mhat; es.mhat_own = g_mhat_own; es.att[0] = g_att[0]; es.att[1] = g_att[1]; es.att_set = 1; es.echoes = g_echoes; es.drop = g_drop; snprintf(es.lamp_map, sizeof es.lamp_map, "%s", g_lamp_map); es.lx = g_lamp_x; es.ly = g_lamp_y; es.lz = g_lamp_z; es.lamp_set = g_lamp_set; es.gas_dead = g_gas_dead; es.eileen_met = g_eileen_met; es.arena_done = g_arena_done; es.eil_state = g_eil_state; memcpy(es.stats, g_stat, sizeof es.stats); es.arcane = g_stat[5]; es.ng = g_ng; es.doll_met = g_doll_met; memcpy(es.wlv, g_wlv, sizeof g_wlv); es.gil_gone = g_gil_gone; memcpy(es.wown, g_wown, sizeof g_wown); memcpy(es.attown, g_att_own, sizeof g_att_own); es.doll_hi = g_doll_hi; es.hd_done = g_hd_done; memcpy(es.litmap, g_lit_map, sizeof g_lit_map); memcpy(es.litx, g_lit_x, sizeof g_lit_x); memcpy(es.lity, g_lit_y, sizeof g_lit_y); es.lit_n = g_lit_n; es.dream_seen = g_dream_seen; es.vb_set = 1; es.vials_s = g_cur_vials >= 0 ? g_cur_vials : g_start_vials; es.bullets_s = g_cur_bullets >= 0 ? g_cur_bullets : g_start_bullets; es.gift_s[0] = g_gift_taken[0]; es.gift_s[1] = g_gift_taken[1]; es.sick_open = g_sick_open; es.insight = g_insight; es.redo_gas = g_gas_redo; es.redo_cb = g_cb_redo; es.gb_dead = g_gb_dead; es.gh_dead = g_gh_dead; es.gh_redo = g_gh_redo; es.gb_redo = g_gb_redo; es.cb_dead = g_cb_dead;      // cb_saved: the Cleric Beast stays dead after quitting
     if (!force && have_last && !memcmp(last_written, mstate, sizeof mstate) && !memcmp(&last_es, &es, sizeof es)) return;
     char sp_[96]; slot_file(sp_, sizeof sp_, "save", "bin", g_slot); FILE *f = fopen(sp_, "wb");
     if (!f) { maplog("save.bin: could not open for writing%s%s", "", ""); return; }
@@ -14017,7 +14045,7 @@ static void save_write(int force) {
     memcpy(last_written, mstate, sizeof mstate); last_es = es; have_last = 1;
 }
 static void save_load(void) {
-    char sp_[96]; slot_file(sp_, sizeof sp_, "save", "bin", g_slot); FILE *f = fopen(sp_, "rb"); if (!f) { maplog("save.bin: none found%s%s", "", ""); memset(g_istore, 0, sizeof g_istore); for (int i = 0; i < 12; i++) g_wown[i] = i == 3; for (int i = 0; i < 4; i++) g_eq[i] = -1; g_eq_r = 0; g_eq_l = 2; g_start_vials = g_start_bullets = 0; g_gift_taken[0] = g_gift_taken[1] = 0; inv_add("HuntersMarkBold", "HUNTERS MARK", 2, 1); return; }      // hunters_mark_start: one mark in the bag of a new hunter      // starter_kit: a new game has nothing but fists, no vials and no bullets
+    char sp_[96]; slot_file(sp_, sizeof sp_, "save", "bin", g_slot); FILE *f = fopen(sp_, "rb"); if (!f) { g_intro_new = 1; maplog("save.bin: none found%s%s", "", ""); memset(g_istore, 0, sizeof g_istore); for (int i = 0; i < 12; i++) g_wown[i] = i == 3; for (int i = 0; i < 4; i++) g_eq[i] = -1; g_eq_r = 0; g_eq_l = 2; g_start_vials = g_start_bullets = 0; g_gift_taken[0] = g_gift_taken[1] = 0; inv_add("HuntersMarkBold", "HUNTERS MARK", 2, 1); return; }      // hunters_mark_start: one mark in the bag of a new hunter      // starter_kit: a new game has nothing but fists, no vials and no bullets
     uint32_t hdr[3] = { 0, 0, 0 };
     if (fread(hdr, sizeof hdr, 1, f) == 1 && hdr[0] == 0x31534242u && hdr[1] == sizeof(MapState) && hdr[2] == MAX_MAPS && fread(mstate, sizeof mstate, 1, f) == 1) {
         EchoSave es; memset(&es, 0, sizeof es);
@@ -14028,6 +14056,7 @@ static void save_load(void) {
         if (nr >= offsetof(EchoSave, arena_done) + sizeof(int)) g_arena_done = es.arena_done != 0;
         if (nr >= offsetof(EchoSave, doll_met) + sizeof(int)) { int ok_ = 1; for (int i = 0; i < 5; i++) if (es.stats[i] < 1 || es.stats[i] > 99) ok_ = 0; if (ok_) { memcpy(g_stat, es.stats, sizeof es.stats); g_stat[5] = 10; if (nr >= offsetof(EchoSave, arcane) + sizeof(int) && es.arcane >= 1 && es.arcane <= 99) g_stat[5] = es.arcane; stats_apply(); } g_doll_met = es.doll_met != 0; }      // doll_level
         if (nr >= offsetof(EchoSave, astore) + sizeof es.astore) { memcpy(g_wstore, es.wstore, sizeof g_wstore); memcpy(g_astore, es.astore, sizeof g_astore); }      // storage: what is kept in the Workshop
+        g_mhat = 0; g_mhat_own = 0; if (nr >= offsetof(EchoSave, mhat_own) + sizeof(int) && es.mhat >= 0 && es.mhat <= 5) { g_mhat = es.mhat; g_mhat_own = es.mhat_own & 0x3E; }      // messenger_hats
         memset(g_istore, 0, sizeof g_istore); if (nr >= offsetof(EchoSave, istore) + sizeof es.istore) { memcpy(g_istore, es.istore, sizeof g_istore); for (int q_ = 0; q_ < MAX_INV; q_++) { g_istore[q_].key[23] = 0; g_istore[q_].label[27] = 0; if (g_istore[q_].n < 0 || g_istore[q_].n > 99) g_istore[q_].n = 0; } }      // item_store
         if (nr >= offsetof(EchoSave, ng) + sizeof(int) && es.ng >= 0 && es.ng < 100) g_ng = es.ng;      // ngplus
         if (nr >= offsetof(EchoSave, wlv) + sizeof es.wlv) { int ok_ = 1; for (int i = 0; i < 12; i++) if (es.wlv[i] < 0 || es.wlv[i] > 10) ok_ = 0; if (ok_) memcpy(g_wlv, es.wlv, sizeof g_wlv); }      // wpn_upgrade
@@ -14750,8 +14779,10 @@ static void panels_draw(const PS1Shader *sh, const float *pv) {      // the pane
     { int anyt_ = 0; for (int i = 0; i < g_npan; i++) if (g_pan[i].tex >= 0 && g_pan[i].tex < (int)nTex && texs[g_pan[i].tex]) anyt_ = 1;
       if (anyt_) { glDisable(GL_BLEND); glDepthMask(GL_TRUE); glUniform1f(sh->alphaCut, 0.33f);      // panel_texture: solid, tiled every 1.5 m
         for (int i = 0; i < g_npan; i++) { const Panel *P = &g_pan[i]; if (P->tex < 0 || P->tex >= (int)nTex || !texs[P->tex]) continue; if (g_pe_on && i == g_pan_sel && ((int)(tsec_hud * 4.0f) & 1)) continue;      // the picked one blinks while editing
-            glBindTexture(GL_TEXTURE_2D, texs[P->tex]); int nx_ = (int)ceilf(P->w / 1.5f), ny_ = (int)ceilf(P->h / 1.5f); if (nx_ < 1) nx_ = 1; if (ny_ < 1) ny_ = 1; if (nx_ > 40) nx_ = 40; if (ny_ > 40) ny_ = 40; float c_ = cosf(P->yaw), s_ = sinf(P->yaw);
-            for (int ty_ = 0; ty_ < ny_; ty_++) for (int tx_ = 0; tx_ < nx_; tx_++) { float ox_ = ((tx_ + 0.5f) / nx_ - 0.5f) * P->w, oz_ = ((ty_ + 0.5f) / ny_ - 0.5f) * P->h; ldr_tint_wall(sh, pv, P->x + c_ * ox_, P->y + s_ * ox_, P->z + oz_, P->w / nx_, P->h / ny_, P->yaw); } } } }
+            glBindTexture(GL_TEXTURE_2D, texs[P->tex]); if (g_nowrap_fix != 0) { glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); if (texClampNow) texClampNow[P->tex] = 1; }      /* wrap_fix: each tile shows its texture once (0..1), so clamp it: no row from the opposite edge */
+            int nx_ = (int)ceilf(P->w / 1.5f), ny_ = (int)ceilf(P->h / 1.5f); if (nx_ < 1) nx_ = 1; if (ny_ < 1) ny_ = 1; if (nx_ > 40) nx_ = 40; if (ny_ > 40) ny_ = 40; float c_ = cosf(P->yaw), s_ = sinf(P->yaw);
+            for (int ty_ = 0; ty_ < ny_; ty_++) for (int tx_ = 0; tx_ < nx_; tx_++) { float ox_ = ((tx_ + 0.5f) / nx_ - 0.5f) * P->w, oz_ = ((ty_ + 0.5f) / ny_ - 0.5f) * P->h; ldr_tint_wall(sh, pv, P->x + c_ * ox_, P->y + s_ * ox_, P->z + oz_, P->w / nx_, P->h / ny_, P->yaw); }
+            if (g_nowrap_fix != 0) { glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT); if (texClampNow) texClampNow[P->tex] = 0; } } } }
     glEnable(GL_BLEND); glBlendFunc(GL_ZERO, GL_ONE_MINUS_SRC_COLOR); glDepthMask(GL_FALSE); glUniform1f(sh->alphaCut, -1.0f);      // the shader writes alpha 1, so the panel darkens what is behind it with the colour instead: dst * (1 - colour)
     for (int pass = 0; pass < 2; pass++) {      // plain panels first, the selected one last
         glBindTexture(GL_TEXTURE_2D, pass ? panSelTex : tintTex);
@@ -14852,6 +14883,225 @@ static void gfx_reset(void) {      // gfx_reset: every graphics setting back to 
     if (g_lowfb && g_r3i != 2) { lowres_step(2 - g_r3i); remove("ux0:data/bbpsx/res3d.txt"); }
 }
 
+
+// ---- gi_intro: the opening cutscene, Seq_GameIntroP1 (35 s): the Contract Granter in his chair, on a black stage.  Plays on a new game and on every new game plus.
+// files in ux0:data/bbpsx/: granter.bin (him + AnimContractGranter_IntroP1), gi_chair.bin (the wheelchair, moved by the camera rig's prop1 bone), snd/mus_gi1.wav (all its sound mixed); nointro.txt turns it off, intro_test.txt plays it at every start
+// generated by gen_intro_cam.py from CutsceneCamRigAnim_IntroP1: cam1 relative to the scene origin (game axes: the converter file to game map (-y, -x, z), metres; forward vector)
+static const float IN1_CAM[150][7] = {
+    {0.000f,0.013f,0.725f,1.199f,0.2710f,-0.9445f,0.1859f},
+    {0.250f,0.013f,0.725f,1.199f,0.2700f,-0.9414f,0.1814f},
+    {0.500f,0.013f,0.725f,1.199f,0.2709f,-0.9448f,0.1844f},
+    {0.750f,0.013f,0.725f,1.199f,0.2699f,-0.9420f,0.1783f},
+    {1.000f,0.013f,0.725f,1.199f,0.2706f,-0.9457f,0.1800f},
+    {1.250f,0.013f,0.725f,1.199f,0.2696f,-0.9432f,0.1727f},
+    {1.500f,0.013f,0.725f,1.199f,0.2694f,-0.9438f,0.1693f},
+    {1.750f,0.013f,0.725f,1.199f,0.2694f,-0.9447f,0.1648f},
+    {2.000f,0.013f,0.725f,1.199f,0.2695f,-0.9454f,0.1605f},
+    {2.250f,0.013f,0.725f,1.199f,0.2705f,-0.9495f,0.1591f},
+    {2.500f,0.013f,0.725f,1.199f,0.2697f,-0.9470f,0.1503f},
+    {2.750f,0.013f,0.725f,1.199f,0.2699f,-0.9479f,0.1443f},
+    {3.000f,0.013f,0.725f,1.199f,0.2702f,-0.9487f,0.1389f},
+    {3.250f,0.013f,0.725f,1.199f,0.2707f,-0.9495f,0.1326f},
+    {3.500f,0.013f,0.725f,1.199f,0.2713f,-0.9501f,0.1269f},
+    {3.750f,0.013f,0.725f,1.199f,0.2729f,-0.9540f,0.1242f},
+    {4.000f,0.013f,0.725f,1.199f,0.2728f,-0.9512f,0.1147f},
+    {4.250f,0.013f,0.725f,1.199f,0.2738f,-0.9517f,0.1083f},
+    {4.500f,0.013f,0.725f,1.199f,0.2757f,-0.9553f,0.1065f},
+    {4.750f,0.013f,0.725f,1.199f,0.2760f,-0.9524f,0.0967f},
+    {5.000f,0.013f,0.725f,1.199f,0.2771f,-0.9526f,0.0916f},
+    {5.250f,0.013f,0.725f,1.199f,0.2784f,-0.9527f,0.0861f},
+    {5.500f,0.013f,0.725f,1.199f,0.2795f,-0.9529f,0.0814f},
+    {5.750f,0.013f,0.725f,1.199f,0.2809f,-0.9529f,0.0764f},
+    {6.000f,0.013f,0.725f,1.199f,0.2820f,-0.9529f,0.0723f},
+    {6.250f,0.013f,0.725f,1.199f,0.2833f,-0.9529f,0.0679f},
+    {6.500f,0.013f,0.725f,1.199f,0.2844f,-0.9528f,0.0642f},
+    {6.750f,0.013f,0.725f,1.199f,0.2858f,-0.9526f,0.0603f},
+    {7.000f,0.013f,0.725f,1.199f,0.2869f,-0.9525f,0.0570f},
+    {7.250f,0.013f,0.725f,1.199f,0.2881f,-0.9524f,0.0536f},
+    {7.500f,0.013f,0.725f,1.199f,0.2893f,-0.9522f,0.0508f},
+    {7.750f,0.013f,0.725f,1.199f,0.2906f,-0.9519f,0.0478f},
+    {8.000f,0.013f,0.725f,1.199f,0.2916f,-0.9517f,0.0455f},
+    {8.250f,0.013f,0.725f,1.199f,0.2929f,-0.9515f,0.0430f},
+    {8.500f,0.013f,0.725f,1.199f,0.2939f,-0.9513f,0.0410f},
+    {8.750f,0.013f,0.725f,1.199f,0.2951f,-0.9510f,0.0390f},
+    {9.000f,0.013f,0.725f,1.199f,0.2961f,-0.9507f,0.0375f},
+    {9.250f,0.013f,0.725f,1.199f,0.2972f,-0.9505f,0.0359f},
+    {9.500f,0.013f,0.725f,1.199f,0.2993f,-0.9534f,0.0383f},
+    {9.750f,0.013f,0.725f,1.199f,0.2993f,-0.9499f,0.0336f},
+    {10.000f,0.013f,0.725f,1.199f,0.3014f,-0.9528f,0.0362f},
+    {10.250f,0.013f,0.725f,1.199f,0.3013f,-0.9493f,0.0318f},
+    {10.500f,0.013f,0.725f,1.199f,0.3023f,-0.9490f,0.0317f},
+    {10.750f,0.013f,0.725f,1.199f,0.3034f,-0.9486f,0.0330f},
+    {11.000f,0.013f,0.725f,1.199f,0.3043f,-0.9483f,0.0344f},
+    {11.250f,0.013f,0.725f,1.199f,0.3053f,-0.9479f,0.0359f},
+    {11.500f,0.013f,0.725f,1.199f,0.3073f,-0.9507f,0.0410f},
+    {11.750f,0.013f,0.725f,1.199f,0.3071f,-0.9472f,0.0391f},
+    {12.000f,0.013f,0.725f,1.199f,0.3078f,-0.9469f,0.0408f},
+    {12.250f,0.013f,0.725f,1.199f,0.3086f,-0.9466f,0.0425f},
+    {12.500f,0.013f,0.725f,1.199f,0.3092f,-0.9463f,0.0443f},
+    {12.750f,0.013f,0.725f,1.199f,0.3097f,-0.9460f,0.0461f},
+    {13.000f,0.013f,0.725f,1.199f,0.3102f,-0.9458f,0.0480f},
+    {13.250f,0.013f,0.725f,1.199f,0.3106f,-0.9456f,0.0498f},
+    {13.500f,0.013f,0.725f,1.199f,0.3108f,-0.9454f,0.0517f},
+    {13.750f,0.013f,0.725f,1.199f,0.3109f,-0.9452f,0.0536f},
+    {14.000f,0.013f,0.725f,1.199f,0.3111f,-0.9451f,0.0556f},
+    {14.250f,0.013f,0.725f,1.199f,0.3111f,-0.9450f,0.0575f},
+    {14.500f,0.013f,0.725f,1.199f,0.3109f,-0.9449f,0.0593f},
+    {14.750f,0.013f,0.725f,1.199f,0.3106f,-0.9449f,0.0612f},
+    {15.000f,0.013f,0.725f,1.199f,0.3102f,-0.9449f,0.0629f},
+    {15.250f,0.013f,0.725f,1.199f,0.3096f,-0.9450f,0.0647f},
+    {15.500f,0.013f,0.725f,1.199f,0.3091f,-0.9450f,0.0663f},
+    {15.750f,0.013f,0.725f,1.199f,0.3086f,-0.9451f,0.0679f},
+    {16.000f,0.013f,0.725f,1.199f,0.3091f,-0.9482f,0.0730f},
+    {16.250f,0.013f,0.725f,1.199f,0.3076f,-0.9452f,0.0707f},
+    {16.500f,0.013f,0.725f,1.199f,0.3073f,-0.9452f,0.0720f},
+    {16.750f,0.013f,0.725f,1.199f,0.3071f,-0.9452f,0.0730f},
+    {17.000f,0.013f,0.725f,1.199f,0.3071f,-0.9451f,0.0741f},
+    {17.250f,0.013f,0.725f,1.199f,0.3072f,-0.9451f,0.0743f},
+    {17.500f,0.013f,0.725f,1.199f,0.3071f,-0.9454f,0.0700f},
+    {17.750f,0.013f,0.725f,1.199f,0.3072f,-0.9458f,0.0649f},
+    {18.000f,0.013f,0.725f,1.199f,0.3075f,-0.9460f,0.0597f},
+    {18.250f,0.013f,0.725f,1.199f,0.3090f,-0.9493f,0.0574f},
+    {18.500f,0.013f,0.725f,1.199f,0.3086f,-0.9464f,0.0480f},
+    {18.750f,0.013f,0.725f,1.199f,0.3093f,-0.9465f,0.0415f},
+    {19.000f,0.013f,0.725f,1.199f,0.3101f,-0.9465f,0.0349f},
+    {19.250f,0.013f,0.725f,1.199f,0.3108f,-0.9465f,0.0287f},
+    {19.500f,0.013f,0.725f,1.199f,0.3116f,-0.9464f,0.0219f},
+    {19.750f,0.013f,0.725f,1.199f,0.3123f,-0.9463f,0.0156f},
+    {20.000f,0.013f,0.725f,1.199f,0.3131f,-0.9461f,0.0090f},
+    {20.250f,0.013f,0.725f,1.199f,0.3138f,-0.9460f,0.0029f},
+    {20.500f,0.013f,0.725f,1.199f,0.3146f,-0.9457f,-0.0033f},
+    {20.750f,0.013f,0.725f,1.199f,0.3151f,-0.9455f,-0.0088f},
+    {21.000f,0.013f,0.725f,1.199f,0.3156f,-0.9453f,-0.0144f},
+    {21.250f,0.013f,0.725f,1.199f,0.3171f,-0.9483f,-0.0159f},
+    {21.500f,0.013f,0.725f,1.199f,0.3163f,-0.9449f,-0.0238f},
+    {21.750f,0.013f,0.725f,1.199f,0.3164f,-0.9448f,-0.0275f},
+    {22.000f,0.013f,0.725f,1.199f,0.3163f,-0.9447f,-0.0310f},
+    {22.250f,0.013f,0.725f,1.199f,0.3175f,-0.9479f,-0.0278f},
+    {22.500f,0.013f,0.725f,1.199f,0.3175f,-0.9478f,-0.0278f},
+    {22.750f,0.013f,0.725f,1.199f,0.3164f,-0.9446f,-0.0311f},
+    {23.000f,0.013f,0.725f,1.199f,0.3164f,-0.9446f,-0.0311f},
+    {23.250f,0.013f,0.725f,1.199f,0.3165f,-0.9446f,-0.0311f},
+    {23.500f,0.013f,0.725f,1.199f,0.3164f,-0.9446f,-0.0311f},
+    {23.750f,0.013f,0.725f,1.199f,0.3175f,-0.9478f,-0.0278f},
+    {24.000f,0.013f,0.725f,1.199f,0.3164f,-0.9447f,-0.0311f},
+    {24.250f,0.013f,0.725f,1.199f,0.3175f,-0.9479f,-0.0278f},
+    {24.500f,0.013f,0.725f,1.199f,0.3176f,-0.9478f,-0.0278f},
+    {24.750f,0.013f,0.725f,1.199f,0.3177f,-0.9478f,-0.0278f},
+    {25.000f,0.013f,0.725f,1.199f,0.3167f,-0.9445f,-0.0312f},
+    {25.250f,0.013f,0.725f,1.199f,0.3181f,-0.9477f,-0.0280f},
+    {25.500f,0.013f,0.725f,1.199f,0.3180f,-0.9441f,-0.0316f},
+    {25.750f,0.013f,0.725f,1.199f,0.3191f,-0.9437f,-0.0320f},
+    {26.000f,0.013f,0.725f,1.199f,0.3204f,-0.9433f,-0.0324f},
+    {26.250f,0.013f,0.725f,1.199f,0.3215f,-0.9429f,-0.0328f},
+    {26.500f,0.013f,0.725f,1.199f,0.3228f,-0.9424f,-0.0332f},
+    {26.750f,0.013f,0.725f,1.199f,0.3238f,-0.9421f,-0.0335f},
+    {27.000f,0.013f,0.725f,1.199f,0.3245f,-0.9418f,-0.0337f},
+    {27.250f,0.013f,0.725f,1.199f,0.3246f,-0.9418f,-0.0337f},
+    {27.500f,0.013f,0.725f,1.199f,0.3246f,-0.9418f,-0.0337f},
+    {27.750f,0.013f,0.725f,1.199f,0.3246f,-0.9418f,-0.0337f},
+    {28.000f,0.013f,0.725f,1.199f,0.3247f,-0.9418f,-0.0337f},
+    {28.250f,0.013f,0.725f,1.199f,0.3247f,-0.9418f,-0.0338f},
+    {28.500f,0.013f,0.725f,1.199f,0.3247f,-0.9418f,-0.0338f},
+    {28.750f,0.013f,0.725f,1.199f,0.3247f,-0.9418f,-0.0338f},
+    {29.000f,0.013f,0.725f,1.199f,0.3247f,-0.9417f,-0.0338f},
+    {29.250f,0.013f,0.725f,1.199f,0.3247f,-0.9417f,-0.0338f},
+    {29.500f,0.013f,0.725f,1.199f,0.3247f,-0.9417f,-0.0338f},
+    {29.750f,0.013f,0.725f,1.199f,0.3247f,-0.9417f,-0.0338f},
+    {30.000f,0.013f,0.725f,1.199f,0.3247f,-0.9417f,-0.0338f},
+    {30.250f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {30.500f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {30.750f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {31.000f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {31.250f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {31.500f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {31.750f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {32.000f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {32.250f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {32.500f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {32.750f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {33.000f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {33.250f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {33.500f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {33.750f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {34.000f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {34.250f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {34.500f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {34.750f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {35.000f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {35.250f,0.013f,0.725f,1.199f,0.3248f,-0.9417f,-0.0338f},
+    {35.500f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {35.750f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {36.000f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {36.250f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {36.500f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {36.750f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {37.000f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+    {37.250f,0.013f,0.725f,1.199f,0.3259f,-0.9449f,-0.0306f},
+};
+
+static Char GRNC, CHRC;
+static void inlog(const char *fmt, int a, int b) { FILE *f = fopen("ux0:data/bbpsx/intro_log.txt", "a"); if (f) { fprintf(f, fmt, a, b); fputc('\n', f); fclose(f); } }      // opened and closed for every line: a crash still shows how far it got
+static void intro_play(float *projM, const PS1Shader *ps, int use_ps1) {
+    if (!use_ps1 || file_exists_("ux0:data/bbpsx/nointro.txt")) return;
+    Char *sv = CUR; int ok_g = 0; { FILE *f_ = fopen("ux0:data/bbpsx/intro_log.txt", "w"); if (f_) fclose(f_); } inlog("intro start %d %d", 0, 0);
+    CUR = &GRNC; if (!GRNC.ok) { load_hunter("ux0:data/bbpsx/granter.bin") || load_hunter("app0:granter.bin"); } ok_g = GRNC.ok; inlog("granter.bin ok=%d anims=%d", ok_g, (int)GRNC.nA);
+    int ag = ok_g ? hunter_anim_find("AnimContractGranter_IntroP1") : -1; if (ag < 0 && ok_g && GRNC.nA > 0) ag = 0;
+    CUR = &CHRC; if (!CHRC.ok) { load_hunter("ux0:data/bbpsx/gi_chair.bin") || load_hunter("app0:gi_chair.bin"); }
+    int ac = CHRC.ok ? hunter_anim_find("CutsceneCamRigAnim_IntroP1") : -1; if (ac < 0 && CHRC.ok && CHRC.nA > 0) ac = 0; CHRC.show_pistol = 1; inlog("gi_chair.bin ok=%d anim=%d", CHRC.ok, ac);
+    CUR = sv;
+    if (!ok_g || ag < 0) { maplog("gi_intro: granter.bin not found, skipped%s%s", "", ""); return; }
+    const float LEN = 36.3f; int n = (int)(sizeof IN1_CAM / sizeof IN1_CAM[0]);
+    music_boss(-1); music_free(); snd_load_wav("ux0:data/bbpsx/snd/mus_gi1.wav", &g_mus[7], 40, 0, 1); if (g_mus[7].d) g_mus_ok = 1; music_boss(4); inlog("music %d samples, ok=%d", g_mus[7].n, g_mus_ok);
+    float vfov = atanf(tanf(14.5f * 0.0174533f) * (float)RES_H / (float)RES_W);      // the sequence's camera: 29 degrees across
+    { float n_ = g_near, f_ = 80.0f, t_ = n_ * tanf(vfov), r_ = t_ * ((float)RES_W / (float)RES_H);
+      glMatrixMode(GL_PROJECTION); glLoadIdentity(); glFrustum(-r_, r_, -t_, t_, n_, f_); frustum_mat(projM, r_, -r_, -t_, t_, n_, f_); glMatrixMode(GL_MODELVIEW); }      // x mirrored: the sequence is shot in UE's left-handed space (no face culling here, so the flip is safe)
+    float rm_[4] = { spawnX, spawnY, spawnZ - 0.9f, 0.0f }; int rm_on = !file_exists_("ux0:data/bbpsx/noroom.txt");      // the sickroom behind him: the scene sits at the new-game spawn point; intro_room.txt = x y z yaw_degrees to move or turn it; noroom.txt turns the room off
+    { FILE *rf_ = fopen("ux0:data/bbpsx/intro_room.txt", "r"); if (rf_) { float a_[4]; if (fscanf(rf_, "%f %f %f %f", &a_[0], &a_[1], &a_[2], &a_[3]) == 4) for (int k_ = 0; k_ < 4; k_++) rm_[k_] = a_[k_]; fclose(rf_); } }
+    int rm_baked = 0; if (rm_on && !batched) { bake_static(); rm_baked = 1; } if (nChunks <= 0) rm_on = 0; inlog("room chunks %d on %d", nChunks, rm_on);      // the chunks only exist once the level has been baked
+    float rmM_[16]; { float c_ = cosf(-rm_[3] * 0.0174533f), s_ = sinf(-rm_[3] * 0.0174533f); float R_[9] = { c_, -s_, 0, s_, c_, 0, 0, 0, 1 }; (void)R_;      // scene = Rz(-yaw) * (level - origin)
+        float ox_ = -(c_ * rm_[0] - s_ * rm_[1]), oy_ = -(s_ * rm_[0] + c_ * rm_[1]);
+        float M_[16] = { c_, s_, 0, 0,  -s_, c_, 0, 0,  0, 0, 1, 0,  ox_, oy_, -rm_[2], 1 }; memcpy(rmM_, M_, sizeof rmM_); }
+    float cam_dx = 0.15f, cam_dz = 0.0f, cam_db = 0.25f; { FILE *cf_ = fopen("ux0:data/bbpsx/intro_cam.txt", "r"); if (cf_) { float a_, b_, c_; int r_ = fscanf(cf_, "%f %f %f", &a_, &b_, &c_); if (r_ >= 2) { cam_dx = a_; cam_dz = b_; cam_db = r_ >= 3 ? c_ : 0.0f; } fclose(cf_); } }      // intro_cam.txt: left, up, back (metres)
+    inlog("cam offset x1000 %d, up x1000 %d", (int)(cam_dx * 1000.0f), (int)(cam_dz * 1000.0f));
+    float gy_ = -1.5707963f, cy_ = -1.5707963f;      // the Granter and the wheelchair turned to face the camera; intro_yaw.txt: two angles in degrees (Granter, chair) to tune it
+    { FILE *yf_ = fopen("ux0:data/bbpsx/intro_yaw.txt", "r"); if (yf_) { float a_, b_; if (fscanf(yf_, "%f %f", &a_, &b_) == 2) { gy_ = a_ * 0.0174533f; cy_ = b_ * 0.0174533f; } fclose(yf_); } }
+    SceCtrlData pad; sceCtrlPeekBufferPositive(0, &pad, 1); unsigned prev = pad.buttons; float t = 0.0f; uint64_t last = sceKernelGetProcessTimeWide(); int fr_ = 0; inlog("loop start %d %d", ag, ac);
+    while (t < LEN) {
+        if (fr_ < 3 || fr_ % 60 == 0) inlog("frame %d t=%d ms", fr_, (int)(t * 1000.0f)); fr_++;
+        uint64_t now = sceKernelGetProcessTimeWide(); float dt = (float)(now - last) * 1e-6f; last = now; if (dt > 0.1f) dt = 0.1f; t += dt;
+        sceCtrlPeekBufferPositive(0, &pad, 1); unsigned pr = pad.buttons & ~prev; prev = pad.buttons;
+        if (pr & (SCE_CTRL_START | SCE_CTRL_CROSS | SCE_CTRL_CIRCLE)) break;
+        int i = (int)(t / 0.25f); if (i > n - 2) i = n - 2; if (i < 0) i = 0;
+        const float *a = IN1_CAM[i], *b = IN1_CAM[i + 1]; float u = (t - a[0]) / (b[0] - a[0]); if (u < 0.0f) u = 0.0f; if (u > 1.0f) u = 1.0f;
+        float ex = a[1] + (b[1] - a[1]) * u, ey = a[2] + (b[2] - a[2]) * u, ez = a[3] + (b[3] - a[3]) * u, fx = a[4] + (b[4] - a[4]) * u, fy = a[5] + (b[5] - a[5]) * u, fz = a[6] + (b[6] - a[6]) * u;
+        { float fl_ = sqrtf(fx * fx + fy * fy); if (fl_ > 1e-4f) { float rx_ = fy / fl_, ry_ = -fx / fl_; ex += rx_ * cam_dx + 0.0f; ey += ry_ * cam_dx; ez += cam_dz; ex -= fx / fl_ * cam_db; ey -= fy / fl_ * cam_db; } }      // intro_cam.txt: the camera slid sideways (+ = to the left of the picture, the picture is mirrored) and up
+        float viewM[16], pv[16]; look_at_mat(viewM, ex, ey, ez, fx, fy, fz); mat_mul(pv, projM, viewM);
+        if (g_lowfb) { glBindFramebuffer(GL_FRAMEBUFFER, g_fbo); glViewport(0, 0, g_r3w, g_r3h); }
+        glClearColor(0.045f, 0.055f, 0.055f, 1.0f); glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);      // the sickroom: dark and foggy
+        glEnable(GL_DEPTH_TEST); glDisable(GL_BLEND);
+        glUseProgram(ps->prog); glUniform1i(ps->tex, 0); glUniform4f(ps->fogColor, 0.045f, 0.055f, 0.055f, 1.0f); glUniform2f(ps->fogRange, 1.2f, 1.0f / 9.0f); glUniform2f(ps->snapHalf, 0.0f, 0.0f); glUniform1f(ps->alphaCut, 0.33f);
+        glEnableVertexAttribArray(0); glEnableVertexAttribArray(1);
+        if (rm_on) { float wv_[16]; mat_mul(wv_, pv, rmM_); glUniformMatrix4fv(ps->wvp, 1, GL_FALSE, wv_); glUniform2f(ps->uvOffset, 0.0f, 0.0f); glUniform1f(ps->affineAmt, 0.0f);
+            for (int ci_ = 0; ci_ < nChunks; ci_++) { const Chunk *C_ = &chunks[ci_]; float dx_ = C_->bc[0] - rm_[0], dy_ = C_->bc[1] - rm_[1], dz_ = C_->bc[2] - rm_[2], R_ = C_->br + 14.0f; if (dx_ * dx_ + dy_ * dy_ + dz_ * dz_ > R_ * R_) continue;
+                glBindTexture(GL_TEXTURE_2D, C_->tex >= 0 ? texs[C_->tex] : whiteTex); glBindBuffer(GL_ARRAY_BUFFER, C_->vbo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, C_->ibo);
+                glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12); glDrawElements(GL_TRIANGLES, C_->nidx, GL_UNSIGNED_SHORT, 0); } }
+        CUR = &GRNC; hunter_pose(ag, t, -1, 0.0f, 0.0f); hunter_skin(); g_in_chair = 0; draw_hunter_ps1(ps, pv, 0.0f, 0.0f, 0.0f, gy_);
+        if (ac >= 0) { CUR = &CHRC; hunter_pose(ac, t, -1, 0.0f, 0.0f); hunter_skin(); g_in_chair = 1; draw_hunter_ps1(ps, pv, 0.0f, 0.0f, 0.0f, cy_); g_in_chair = 0; }
+        CUR = sv;
+        glDisableVertexAttribArray(0); glDisableVertexAttribArray(1); glUseProgram(0);
+        if (g_lowfb) lowres_present();
+        { float fa = t < 1.0f ? 1.0f - t : (t > 33.433f ? (t - 33.433f) / 1.867f : 0.0f); if (fa > 0.0f) draw_fade(fa); }      // the sequence's Fade track: in at the start, out at the end
+        music_update(dt); { Voice *V_ = &g_vo[MUS_VOICE]; float k_ = g_amb_cfg[6] > 0.01f ? g_amb_cfg[6] : 1.0f; V_->vl = V_->vr = g_mus_cur * k_; }      // the ambient volume is not set yet on a new game: never let it mute the cutscene
+        vglSwapBuffers(GL_FALSE);
+    }
+    inlog("loop done %d %d", fr_, 0); music_boss(-1); music_free(); CUR = sv; g_in_chair = 0;
+    { float n_ = g_near, f_ = 80.0f, t_ = n_ * tanf(35.0f * 3.14159265f / 180.0f), r_ = t_ * ((float)RES_W / (float)RES_H);
+      glMatrixMode(GL_PROJECTION); glLoadIdentity(); glFrustum(-r_, r_, -t_, t_, n_, f_); frustum_mat(projM, -r_, r_, -t_, t_, n_, f_); glMatrixMode(GL_MODELVIEW); }
+    if (!g_crackdbg) { if (map_interior(cur_map)) glClearColor(0.0f, 0.0f, 0.0f, 1.0f); else glClearColor(0.07f, 0.06f, 0.09f, 1.0f); }      // the map's own background again
+    if (rm_baked) batch_free();      // the game bakes the level itself once the world is running (doors, lifts and so on are set up by then)
+    inlog("intro finished %d %d", 0, 0); maplog("gi_intro: played%s%s", "", "");
+}
 int main(void) {
     sceIoMkdir("ux0:data", 0777); sceIoMkdir("ux0:data/bbpsx", 0777); sceIoMkdir("ux0:data/bbpsx/snd", 0777);      // a fresh install has no data folder yet: the saves need it
     float projM[16];
@@ -15083,6 +15333,7 @@ int main(void) {
     int fails = 0;
     float tsec = 0.0f;
     snd_init();                                                      // sound starts once everything is loaded
+    if ((g_intro_new || file_exists_("ux0:data/bbpsx/intro_test.txt")) && !g_ngp_go) { intro_play(projM, &ps1, use_ps1); }      // gi_intro: a new hunter
     uint64_t last = sceKernelGetProcessTimeWide();
 
     for (;;) {
@@ -15140,6 +15391,12 @@ int main(void) {
                     int id_ = ids_[g_shop_sel];
                     if (id_ >= 400) {      // ins_shop: pay with insight
                         const InsItem *ii_ = &INS_ITEMS[id_ - 400];
+                        if (ii_->kind == 4) {      // messenger_hats: buy (once) and wear, or wear one you own
+                            int a_ = ii_->a;
+                            if (a_ == 0 || ((g_mhat_own >> a_) & 1)) { g_mhat = a_; say(a_ ? "THE MESSENGERS WEAR IT" : "THE MESSENGERS GO BARE-HEADED"); snd_play(S_PICKUP, 0.6f); save_write(0); }
+                            else if (g_insight < ii_->cost) { snd_play(S_HIT, 0.3f); say("NOT ENOUGH INSIGHT"); }
+                            else { g_insight -= ii_->cost; g_mhat_own |= 1 << a_; g_mhat = a_; say("BOUGHT IT - THE MESSENGERS WEAR IT"); snd_play(S_PICKUP, 0.9f); save_write(0); }
+                        } else
                         if (ii_->kind != 0) {      // a weapon or attire: bought once
                             if (ins_own(id_ - 400)) { snd_play(S_HIT, 0.3f); say("YOU ALREADY OWN IT"); }
                             else if (g_insight < ii_->cost) { snd_play(S_HIT, 0.3f); say("NOT ENOUGH INSIGHT"); }
@@ -15268,7 +15525,7 @@ int main(void) {
             unsigned p0 = pad.buttons & ~prev_buttons;
             if (g_dlg_cont && g_dlg_n == 3 && g_dlg_snd[0] == S_GH_5) { uint64_t nw_ = sceKernelGetProcessTimeWide(); static uint64_t lw_; float d_ = (lw_ && g_dlg_t > 0.0f) ? (float)(nw_ - lw_) / 1000000.0f : 0.001f; lw_ = nw_; if (d_ > 0.1f) d_ = 0.1f; g_dlg_t += d_; int pg_ = g_dlg_t >= 19.4f ? 2 : (g_dlg_t >= 7.65f ? 1 : 0); if (pg_ > g_dlg_i) g_dlg_i = pg_; }      // sub_sync: his refusal is one 23 s recording; the three subtitle pages follow it (page 2 at 7.65 s, page 3 at 19.4 s)
             if (p0 & SCE_CTRL_CROSS) { if (g_dlg_cont) { snd_stop_dlg(); dlg_close(); } else { snd_stop_dlg(); if (++g_dlg_i >= g_dlg_n) dlg_close(); else dlg_voice(); } }      // while the one long clip runs X skips the rest of it
-            if (p0 & SCE_CTRL_CIRCLE) { snd_stop_dlg(); dlg_close(); }
+            if (p0 & SCE_CTRL_CIRCLE) { snd_stop_dlg(); dlg_close(); g_wm_open = 0; }      // tomb_circle: at the Dream's tombstone the messenger's note and the travel list open together, so O shuts both
             if (dead_t >= 0.0f || fade_st != 0) { g_dlg_open = 0; g_note_who = -1; }
             if (g_dlg_open && g_dlg_who < 0 && !g_dlg_arena && hypotf(g_win_x - pl.x, g_win_y - pl.y) > 6.0f) dlg_close();      // win_npc: walk away and it closes
             if (g_dlg_open && g_dlg_who >= 0 && g_dlg_who < n_en && !g_dlg_arena && hypotf(ENS[g_dlg_who].p.x - pl.x, ENS[g_dlg_who].p.y - pl.y) > 6.0f) dlg_close();      // talk_walk: walk 6 m away and it closes
@@ -15387,12 +15644,6 @@ int main(void) {
                     }
                     else if (SYS_MAP[g_sys_sel] == 13) { g_ldr_tint = !g_ldr_tint; say(g_ldr_tint ? "DOOR TINT ON" : "DOOR TINT OFF"); }
                     else if (SYS_MAP[g_sys_sel] == 14) { int ni_ = ldr_nearest(flying ? fly_x : pl.x, flying ? fly_y : pl.y); if (ni_ >= 0) { ld_dis[ni_] = !ld_dis[ni_]; ldr_dis_save(); char t_[64]; snprintf(t_, sizeof t_, "%s %s", ldrs[ni_].name, ld_dis[ni_] ? "OFF" : "ON"); say(t_); } }
-                    else if (SYS_MAP[g_sys_sel] == 15) {      // panel_editor: on = free cam + the edit controls (TRIANGLE add, SQUARE mode, hold CIRCLE + stick edits, D-pad left / right picks, D-pad down deletes)
-                        g_pe_on = !g_pe_on; if (g_pe_on) g_te_on = 0;
-                        if (g_pe_on && !flying) { flying = 1; fly_x = pl.x; fly_y = pl.y; fly_z = pl.z + PL_EYE; }
-                        else if (!g_pe_on && flying) { flying = 0; pl.x = fly_x; pl.y = fly_y; pl.z = fly_z - PL_EYE; pl.vz = 0; pl.grounded = 0; }      // switching the editor off also leaves the free cam
-                        g_inv_open = 0; say(g_pe_on ? "PANEL EDITOR ON" : "PANEL EDITOR OFF");
-                    }
                     else if (SYS_MAP[g_sys_sel] == 30) {      // texture_editor: on = free cam + the pick / flick controls
                         g_te_on = !g_te_on; if (g_te_on) { g_pe_on = 0; g_te_nl = 0; if (!flying) { flying = 1; fly_x = pl.x; fly_y = pl.y; fly_z = pl.z + PL_EYE; } }
                         else if (flying) { flying = 0; pl.x = fly_x; pl.y = fly_y; pl.z = fly_z - PL_EYE; pl.vz = 0; pl.grounded = 0; }      // switching the editor off also leaves the free cam
@@ -15435,7 +15686,8 @@ int main(void) {
                             hp = HP_MAX; stam = STAM_MAX; vials = VIALS_MAX; bullets = BULLETS_MAX; g_cur_vials = vials; g_cur_bullets = bullets;
                             save_write(0); g_inv_open = 0;
                             snprintf(pend_map, sizeof pend_map, "%s", file_exists_("ux0:data/bbpsx/level_ic_firstfloorsickroom.bin") ? "ic_firstfloorsickroom" : start_map); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1;
-                            { char t_[48]; snprintf(t_, sizeof t_, "NEW GAME PLUS  CYCLE %d", g_ng + 1); say(t_); } maplog("new game plus: started%s%s", "", ""); }
+                            { char t_[48]; snprintf(t_, sizeof t_, "NEW GAME PLUS  CYCLE %d", g_ng + 1); say(t_); } maplog("new game plus: started%s%s", "", "");  intro_play(projM, &ps1, use_ps1); last = sceKernelGetProcessTimeWide(); }      // gi_intro: every new game plus too
+
         unsigned pressed = pad.buttons & ~prev_buttons;
         int use_vial_ = g_inv_use_vial; if (use_vial_) { pressed |= SCE_CTRL_TRIANGLE; g_inv_use_vial = 0; }
         (void)use_vial_;                                                                                                       // TRIANGLE always drinks a blood vial: the vials are permanently equipped, the quick item below them is cycled with D-pad up
@@ -16012,6 +16264,7 @@ int main(void) {
                 int si = (di >= 0 || li >= 0) ? -1 : near_switch(pl.x, pl.y, pl.z);
                 int ds = (di >= 0 || li >= 0 || si >= 0) ? -1 : near_devsw(pl.x, pl.y, pl.z);
                 int ni = (di >= 0 || li >= 0 || si >= 0 || ds >= 0) ? -1 : near_npc(pl.x, pl.y, pl.z);
+                if (ni >= 0 && ENS[ni].type == 23 && !strcasecmp(cur_map, "huntersdream") && pt_dist(pl.x, pl.y, DREAM_STONES[1][0], DREAM_STONES[1][1]) < 2.2f) ni = -1;      // tomb_msg: at the travel stone X opens only the travel list; its messenger is just there to look at
                 int wi = (di >= 0 || li >= 0 || si >= 0 || ds >= 0 || ni >= 0) ? -1 : near_win(pl.x, pl.y, pl.z);      // win_npc
                 int bk = (di >= 0 || li >= 0 || si >= 0 || ds >= 0 || ni >= 0 || wi >= 0) ? 0 : (!strcasecmp(cur_map, "huntersworkshop") && bench_near(pl.x, pl.y, pl.z));      // workbench
                 int stk = (di >= 0 || li >= 0 || si >= 0 || ds >= 0 || ni >= 0 || wi >= 0 || bk) ? 0 : (!strcasecmp(cur_map, "huntersworkshop") && store_near_r(pl.x, pl.y, pl.z, 2.0f));      // item storage
@@ -16757,7 +17010,7 @@ int main(void) {
                     glUniform2f(ps1o.snapHalf, snap_on ? SNAP_W * 0.5f : 0.0f, snap_on ? SNAP_H * 0.5f : 0.0f);
                     glUseProgram(ps1.prog);
                 }
-                if (g_tbias != 0.0f) glEnable(GL_POLYGON_OFFSET_FILL); int lastTex = -2, curO = 0, curL = 0;
+                if (g_tbias != 0.0f) glEnable(GL_POLYGON_OFFSET_FILL); int lastTex = -2, lastClamp = -1, curO = 0, curL = 0;
                 PA = &ps1; PO = &ps1o;
                 for (int ci = 0; ci < nChunks; ci++) {
                     const Chunk *C = &chunks[ci];
@@ -16769,10 +17022,11 @@ int main(void) {
                         else for (int k_ = 0; k_ < 4; k_++) if (g_Lp[k_][3] > 0.0f) { float dx_ = C->bc[0] - g_Lp[k_][0], dy_ = C->bc[1] - g_Lp[k_][1], dz_ = C->bc[2] - g_Lp[k_][2], R_ = g_Lp[k_][3] + C->br; if (dx_ * dx_ + dy_ * dy_ + dz_ * dz_ < R_ * R_) { wantL = 1; break; } }      // lit_fps: a chunk no light reaches looks the same with the plain, cheaper program
                     }
                     if (wantO != curO || wantL != curL) { curO = wantO; curL = wantL; const PS1Shader *Q_ = wantL ? (wantO ? &ps1oL : &ps1L) : (wantO ? &ps1o : &ps1); PA = wantL ? &ps1L : &ps1; PO = wantL ? &ps1oL : &ps1o; glUseProgram(Q_->prog); lastTex = -2; }
-                    if (C->tex != lastTex) {
-                        lastTex = C->tex; int has = C->tex >= 0;
+                    if (C->tex != lastTex || C->clamp != lastClamp) {
+                        lastTex = C->tex; lastClamp = C->clamp; int has = C->tex >= 0;
                         if (g_tbias != 0.0f) glPolygonOffset(0.0f, has ? -g_tbias * (float)(2 + (C->tex % 61) * 2) : 0.0f);      // tex_bias
                         glBindTexture(GL_TEXTURE_2D, has ? texs[C->tex] : whiteTex);
+                        if (has && texClampNow && texClampNow[C->tex] != C->clamp) { texClampNow[C->tex] = C->clamp; glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, C->clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, C->clamp ? GL_CLAMP_TO_EDGE : GL_REPEAT); }      // wrap_fix
                         glUniform2f(curO ? PO->uvOffset : PA->uvOffset, 0.0f, (has && texPan[C->tex]) ? PAN_V(texPan[C->tex], tsec) : 0.0f);
                         if (!curO) glUniform1f(PA->affineAmt, has ? texAff[C->tex] : 0.0f);
                     }
@@ -16785,6 +17039,7 @@ int main(void) {
                 glUseProgram(ps1.prog);      // opaque_fast / light_shader: back to the plain full program for everything else
             }
             glDisable(GL_POLYGON_OFFSET_FILL);
+            if (texClampNow) for (int t_ = 0; t_ < (int)nTex; t_++) if (texClampNow[t_]) { texClampNow[t_] = 0; glBindTexture(GL_TEXTURE_2D, texs[t_]); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT); }      // wrap_fix: the pieces drawn one by one below (doors...) tile as before
             TR("chunks drawn");
             for (uint32_t i = 0; i < nInst; i++) {
                 if (!instDyn || (instDyn[i] != 1 && instDyn[i] != 3)) continue;                            // doors and lift cars (moving) are still drawn one by one (2 = a broken barrel: gone, 3 = a barrel that is still there)
