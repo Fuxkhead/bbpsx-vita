@@ -30,24 +30,39 @@ for H in SM_HatHunter SM_RumpledHat SM_TopHat SM_HatSteepled SM_HatDoll; do
 done
 if [ "$(echo $HL | tr ',' '\n' | wc -l)" = 5 ]; then
   # the hats go where the head bone is: MHZ adds height (cm), MHS scales them (the messengers are small), MHX / MHY slide them
-  HOFF=$(python3 - "$PSK" "${MHX:-0}" "${MHY:-0}" "${MHZ:-0}" <<'P'
+  HOFF=$(python3 - "$PSK" "${MHX:-0}" "${MHY:-0}" "${MHZ:-0}" "${MHS:-0.6}" "$HL" <<'P'
 import sys; sys.path.insert(0, 'assets/tools')
+import numpy as np
 from convert_hunter import load_psk, world_chain
-m = load_psk(sys.argv[1]); names = [b['name'] for b in m['bones']]
+m = load_psk(sys.argv[1]); sc = float(sys.argv[5])
+names = [b['name'] for b in m['bones']]
 W = world_chain(names, [b['parent'] for b in m['bones']], [(b['q'], b['p']) for b in m['bones']])
-h = names.index('head') if 'head' in names else 0; p = W[h][1]
-print("%.2f,%.2f,%.2f" % (p[0] + float(sys.argv[2]), p[1] + float(sys.argv[3]), p[2] + float(sys.argv[4])))
+hn = 'head' if 'head' in names else names[0]; hp = W[hn][1]
+top = float(np.max(m['pts'][:, 2]))      # the top of the messenger's own head
+hats = [load_psk(f)['pts'] for f in sys.argv[6].split(',')]
+lo = float(np.mean([h[:, 2].min() for h in hats])) * sc      # where the hats' own bottoms are, scaled
+cx = float(np.mean([(h[:, 0].min() + h[:, 0].max()) / 2 for h in hats])) * sc; cy = float(np.mean([(h[:, 1].min() + h[:, 1].max()) / 2 for h in hats])) * sc
+z = top - lo - 1.5      # the hats' bottoms rest 1.5 cm into the top of the head (MHZ moves them from there)
+sys.stderr.write("messenger: head bone z %.1f, top of the head z %.1f; hats (scaled) bottom z %.1f\n" % (hp[2], top, lo))
+print("%.2f,%.2f,%.2f" % (hp[0] - cx + float(sys.argv[2]), hp[1] - cy + float(sys.argv[3]), z + float(sys.argv[4])))
 P
 )
   echo "hats: head bone at $HOFF  (scale ${MHS:-0.6}; tune with MHZ=<cm up> MHS=<size> MHX= MHY=)"
   HATARGS="--mhats $HL --mhatoff $HOFF --mhatscale ${MHS:-0.6}"
 else HATARGS=""; echo "hats skipped (not all five found)"; fi
+# messenger_weapons: what the two gift messengers hold out (cleaver + cane / pistol + blunderbuss); the game shows the right pair. MWS = size (0.6), MWROT="x,y,z" degrees, MWOFF="x,y,z" cm; the game can also nudge them (SELECT in a gift shop)
+WL=""; for P in "Cleaver/Mesh/SkM_Cleaver.psk" "ThreadedCane/Mesh/SM_ThreadedCane.pskx" "HunterPistol/Mesh/SM_Hunter_Pistol.pskx" "Blunderbuss/Mesh/SM_Blunderbuss.pskx"; do
+  WF=$(find assets/BP -ipath "*PlayerWeapons/$P" | head -1); [ -n "$WF" ] || { echo "weapon $P NOT FOUND"; WL=""; break; }
+  WL="$WL${WL:+,}$WF"
+done
+if [ -n "$WL" ]; then WEAPARGS="--mweaps $WL --mwscale ${MWS:-0.6} --mwrot ${MWROT:-0,0,0} --mwoff ${MWOFF:-0,0,0}"; echo "weapons: $WL"; else WEAPARGS=""; echo "weapons skipped"; fi
+# (the hat materials have no texture of their own in the export: the texmap below lends them the closest ones)
 NOTEARGS=""
 if [ -n "$NOTE" ] && echo " $BONES " | grep -q " NoteSocket "; then      # the game's own socket for the note (BP_NoteMessenger attaches it to "NoteSocket")
   echo "note: attached at the NoteSocket (the original holding position)"
   NOTEARGS="--pistol $NOTE ${NOTE2:+--pistol2 $NOTE2} --pistolbone NoteSocket --pistolframe socket --pistolsocket NoteSocket --pistolrot ${NROT:-0,0,0} --pistoloff ${NOFF:-0,0,0} --cbone ${CBONE:-hand_l} --cframe hand --crot ${CROT:-0,0,0} ${COFF:+--coff $COFF}"      # the OPEN note stays at the NoteSocket; the CLOSED note (idle) is in the left hand (CBONE=hand_r for the right; CROT / COFF tune it)
 elif [ -n "$NOTE" ] && [ -n "$BONE" ]; then NOTEARGS="--pistol $NOTE ${NOTE2:+--pistol2 $NOTE2} --pistolbone $BONE --pistolframe hand --pistolrot ${NROT:-0,0,0} ${NOFF:+--pistoloff $NOFF}"; fi
 python3 assets/tools/convert_hunter.py --psk "$PSK" --psa "$PSA" --psaonly HoldMessage,CloseMessage,Appear,Hide,${MIDLE:-Reach1},HoldCleaver,HoldPistol \
-  $NOTEARGS $HATARGS --tex assets/Char/NPCs/Messenger assets/Cine assets/Char/Hunter --texmap "MI_Messenger=t_messenger,MI_MessengerNote=t_messenger" --tint none --fps 20 --out messenger.bin 2>&1 | grep -E "WARNING|^wrote|bones missing|Error|Traceback|points|skip|anim" | head -20
+  $NOTEARGS $HATARGS $WEAPARGS --tex assets/Char/NPCs/Messenger assets/Cine assets/Char/Hunter assets/Char assets/BP/PlayerWeapons assets/NMKART --texmap "MI_Cleaver=t_sawcleaver,MI_Pistol=t_pistol,MI_Blunderbuss=t_blunder,MI_ThreadedCane=T_Cane,MI_Messenger=t_messenger,MI_MessengerNote=t_messenger,MI_Gehrman=t_gehrmanbody,MI_GehrmanHatsAlt=t_gehrmanbody,MI_DollBodyPrev=t_doll_body,MI_HunterHeadPrev=t_hunterredehat" --tint none --fps 20 --out messenger.bin 2>&1 | grep -E "WARNING|^wrote|bones missing|Error|Traceback|points|skip|anim" | head -60
 ls -l messenger.bin
 echo "Copy messenger.bin to ux0:data/bbpsx/"

@@ -158,6 +158,7 @@ def main():
     ap.add_argument('--tex', nargs='+', default=None, help='one or more folders with the PNG textures (T_HunterBody.png, t_sawcleaver.png, ...)')
     ap.add_argument('--texmap', default='MI_HunterFace=BbPSX_Head128v3,MI_HunterHair=t_hair,MI_HunterHeadPrev=T_HunterHead,MI_Cleaver=t_sawcleaver', help='MATERIAL=texturefile pairs (no .png) for materials whose texture is not named T_<material>')
     ap.add_argument('--hat', default=None, help='static mesh (.pskx) glued rigidly to the head bone')
+    ap.add_argument('--mweaps', default=None, help='comma list of weapon meshes (.psk / .pskx) held by the messengers: section flags 5,6,7,8 (cleaver, cane in the first two hands... the game shows the right ones); even ones in hand_r, odd ones in hand_l'); ap.add_argument('--mwscale', type=float, default=0.6); ap.add_argument('--mwrot', default='0,0,0'); ap.add_argument('--mwoff', default='0,0,0')
     ap.add_argument('--mhats', default=None, help='comma list of static hat meshes (.pskx) glued to the head bone as switchable hats: section flags 10,11,12... (the game draws only the worn one)')
     ap.add_argument('--mhatoff', default='0,0,0', help='offset (cm, file space) added to every --mhats mesh after scaling'); ap.add_argument('--mhatscale', type=float, default=1.0, help='scale of every --mhats mesh, about its own origin')
     ap.add_argument('--hatoff', default='0,2,155.6', help='hat offset in file space cm (x,y,z) added to the hat mesh before attaching to the head')
@@ -202,6 +203,9 @@ def main():
         hm = load_psk(hp_); hm['static'] = True; hm['mhat'] = hi_
         hm['pts'] = hm['pts'] * a.mhatscale + np.array([float(x) for x in a.mhatoff.split(',')], dtype=np.float32)
         meshes.append(hm); a.psk = list(a.psk) + [hp_]
+    for wi_, wp_ in enumerate([x for x in (a.mweaps or '').split(',') if x]):
+        wm = load_psk(wp_); wm['static'] = True; wm['mweap'] = wi_; wm['bone'] = 'hand_r' if wi_ % 2 == 0 else 'hand_l'
+        meshes.append(wm); a.psk = list(a.psk) + [wp_]
     if a.weapon:
         wm = load_psk(a.weapon); wm['static'] = True; wm['bone'] = 'hand_r'; wm['weapon'] = True
         meshes.append(wm); a.psk = list(a.psk) + [a.weapon]
@@ -258,6 +262,12 @@ def main():
             wnames_ = [b['name'] for b in mm['bones']]
             mm['bind_w'] = world_chain(wnames_, [b['parent'] for b in mm['bones']], [(b['q'], b['p']) for b in mm['bones']])
             mm['pts'] = (np.array(hp, float)[None, :] + (qmat(np.array(hq, float)) @ (Mw @ mm['pts'].astype(float).T + off[:, None])).T).astype(np.float32)
+        if 'mweap' in mm:      # messenger weapons: the mesh origin sits in the hand (fingers along +x like the pistol's 'hand' frame), scaled to the messenger; the game can nudge it afterwards
+            sq, sp = bind[mm['bone']]; Rs = qmat(np.array(sq, float)) @ np.array([[0, -1, 0], [0, 0, -1], [1, 0, 0]], float)
+            rx, ry, rz = [np.radians(float(x)) for x in a.mwrot.split(',')]
+            Rx_ = np.array([[1, 0, 0], [0, np.cos(rx), -np.sin(rx)], [0, np.sin(rx), np.cos(rx)]]); Ry_ = np.array([[np.cos(ry), 0, np.sin(ry)], [0, 1, 0], [-np.sin(ry), 0, np.cos(ry)]]); Rz_ = np.array([[np.cos(rz), -np.sin(rz), 0], [np.sin(rz), np.cos(rz), 0], [0, 0, 1]])
+            off = np.array([float(x) for x in a.mwoff.split(',')])
+            mm['pts'] = (np.array(sp, float)[None, :] + (Rs @ (Rz_ @ Ry_ @ Rx_ @ (mm['pts'].astype(float) * a.mwscale + off).T)).T).astype(np.float32)
         if mm.get('pistol'):
             # pistol file axes (barrel = -Y, top = +Z) coincide with the socket's axes; slide / roll it with --pistoloff / --pistolrot
             pf_ = a.pistolframe; pb_ = a.pistolbone; prot_ = a.pistolrot; poff_ = a.pistoloff      # closed_note: the closed note may sit in another hand than the open one
@@ -329,7 +339,7 @@ def main():
                     else:
                         i0, i1, i2 = (int(x) + vbase for x in f['w'])
                     idx += [i0, i2, i1]                      # reflection flips the winding
-                sections.append((start, len(idx) - start, mat_names.index(mname), (3 if mm.get('pistol2') else (2 if mm.get('pistol') else (10 + mm['mhat'] if 'mhat' in mm else 0)))))
+                sections.append((start, len(idx) - start, mat_names.index(mname), (3 if mm.get('pistol2') else (2 if mm.get('pistol') else (10 + mm['mhat'] if 'mhat' in mm else (5 + mm['mweap'] if 'mweap' in mm else 0))))))
         if extra:
             vert_chunks.append(np.array(extra, dtype=verts.dtype)); nW += len(extra)
         vbase += nW
