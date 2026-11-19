@@ -5,6 +5,7 @@
 //           TRIANGLE = drink a blood vial, L1 = pistol, front touch = lock on (tap) / switch target (flick), D-pad up = respawn enemies + refill, SQUARE = transform the cleaver, START = respawn (hold 1.5 s = quit).
 #include <vitaGL.h>
 #include <psp2/ctrl.h>
+#include <psp2/display.h>
 #include <psp2/touch.h>
 #include <psp2/kernel/processmgr.h>
 #include <psp2/gxm.h>
@@ -51,13 +52,14 @@ static float g_snap_w = 320.0f, g_snap_h = 180.0f;      // snapgrid.txt ("w h") 
 #define SNAP_H g_snap_h
 #define LADDER_AFFINE 0.25f  /* MI_ladder_metal AffineAmt: 0 = perspective-correct, 1 = full PS1 affine */
 static int g_fog_on = 1;      // fog is on by default (the System menu FOG row turns it off)
-static int g_fog_on_dummy_ = 0; static float g_fog_user = 0.0f, g_fog_map = 36.0f;      // fog_sky: System menu: fog on/off, own distance (0 = the map's)
+static int g_fog_on_dummy_ = 0; static float g_fog_user = 0.0f, g_fog_map = 100.0f;      // fog_sky: System menu: fog on/off, own distance (0 = the map's)
+static float g_fog_def = 60.0f;      /* fog_one: one draw distance for every map: 60 m, or whatever the player sets in the System menu (fog_dist.txt) */
 static float g_fog_k = 1.0f;      /* fog_close: the haze reaches full colour at this fraction of the draw distance, so far geometry is already hidden before it is culled */
 static int g_noy = 1;      /* stick_noy: standard play ignores the left stick's Y axis */
 #define FOGV_END (g_fog_end * g_fog_k)
 #define FOG_START (FOGV_END * 0.2f > 7.0f ? 7.0f : FOGV_END * 0.2f)
 static int g_nohaze = 0;      /* perf_nohaze: no distance haze in the shader on the slow maps (the cut-off distance still applies) */
-static float g_fog_end = 36.0f;      // fog distance (past it everything is fog colour and is not drawn): per map, see map_tune()
+static float g_fog_end = 100.0f;      // fog distance (past it everything is fog colour and is not drawn): per map, see map_tune()
 #define FOG_END g_fog_end
 #define CAM_DIST 3.0f        /* third-person camera distance (m) */
 #define CAM_HEIGHT 1.5f      /* camera target height above the Hunter's feet */
@@ -68,13 +70,14 @@ static float g_fog_end = 36.0f;      // fog distance (past it everything is fog 
 #define ATTACK_LUNGE 0.85f   /* m: fallback lunge if hunter.bin has no travel data */
 // doll_level: the Doll turns blood echoes into levels; the five stats set these (hp, stamina, melee and gun damage)
 static float g_hpmax = 100.0f, g_stmax = 100.0f, g_gmul = 1.0f, g_sb = 0.0f, g_kb = 0.0f, g_amul = 1.0f;      // g_sb / g_kb: the strength / skill damage bonuses (each weapon takes its own share)
-static const float WSCAL[12][2] = { {0.5f,0.5f}, {0.8f,0.2f}, {0.4f,0.6f}, {0.6f,0.4f}, {0.1f,0.9f}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0.2f,0.8f}, {0.9f,0.1f} };      // doll_level: how much of each stat a weapon uses (strength, skill)
+#define NWPN 17      /* (16: drawing-only, the Moonlight Sword's blade of light) */ /* weapon ids: 0..11 the originals, 12 and 13 are drawing-only ids (the cane's open form, the Tonitrus' lightning), 14 the Burial Blade, 15 the Holy Moonlight Sword */
+static const float WSCAL[NWPN][2] = { {0.5f,0.5f}, {0.8f,0.2f}, {0.4f,0.6f}, {0.6f,0.4f}, {0.1f,0.9f}, {0,0}, {0,0}, {0,0}, {0,0}, {0,0}, {0.2f,0.8f}, {0.9f,0.1f}, {0,0}, {0,0}, {0.6f,0.4f}, {0.6f,0.4f}, {0,0} };      // doll_level: how much of each stat a weapon uses (strength, skill)
 static int g_stat[6] = { 10, 10, 10, 10, 10, 10 };      // vitality, endurance, strength, skill, bloodtinge, arcane
 typedef struct { float x, y; char t[200]; } MsgNote;      // note_text: notes_<map>.txt (extract_notes.py): the words each messenger holds
 static MsgNote g_notes[32]; static int g_notes_n = 0;
 static int g_ghn_slot = -1; static float g_ghn_pos[3];      // gh_puff: the wheelchair Gehrman's slot and his real spot
 static int g_gh_end = 0; static int g_gh_post = 0; static int g_gh_ui = 0, g_gh_sel = 0, g_gh_ask = 0, g_gh_dead = 0, g_gh_redo = 0, g_gb_redo = 0;      // gehrman_boss: his offer menu, which choice, the offer is next after his lines, killed (saved)
-static int g_note_who = -1; static int g_gehr_met = 0; static int g_doll_who = -1; static int g_doll_ui = 0, g_doll_sel = 0, g_doll_pend[6], g_doll_talk = 0, g_doll_met = 0;      // 0 closed, 1 her menu, 2 channel echoes
+static int g_note_who = -1; static int g_gehr_met = 0; static int g_doll_who = -1; static int g_doll_post = 0; static int g_doll_ui = 0, g_doll_sel = 0, g_doll_pend[6], g_doll_talk = 0, g_doll_met = 0;      // 0 closed, 1 her menu, 2 channel echoes
 static int stat_level(void) { int t = 0; for (int i = 0; i < 6; i++) t += g_stat[i]; return t - 50; }
 static int lvl_cost(int L) { float x = 0.02f * L * L * L + 3.06f * L * L + 105.6f * L - 895.0f; return x < 100.0f ? 100 : (int)x; }      // echoes to go from level L to L+1
 static float stat_eff(int v, int c1, int c2, float r1, float r2) {      // doll_level: points above 10 count in full up to the first soft cap, at r1 up to the second, at r2 after
@@ -644,7 +647,7 @@ static int g_insight;      // insight: +3 per boss slain, +1 per lantern lit; th
 static int g_sick_open;      // death_dream: dying before any lantern was rested at sends you to the Dream and lights the sickroom's lantern for good (saved)
 static int lamp_lit_at(const char *map, float x, float y) {
     if (g_sick_open && !strcasecmp(map, "ic_firstfloorsickroom")) return 1;
-    if (!strcasecmp(map, "huntersdream") || !strcasecmp(map, "huntersworkshop")) return 1;      // the Dream's and the Workshop's own lanterns are always lit
+    if (!strcasecmp(map, "huntersdream") || !strcasecmp(map, "huntersworkshop") || !strcasecmp(map, "romarena") || !strcasecmp(map, "moonarena") || !strcasecmp(map, "romlake")) return 1;      // the Dream's and the Workshop's own lanterns are always lit
     for (int i = 0; i < g_lit_n; i++) if (!strcasecmp(g_lit_map[i], map) && fabsf(g_lit_x[i] - x) < 0.6f && fabsf(g_lit_y[i] - y) < 0.6f) return 1;
     return 0;
 }
@@ -710,12 +713,13 @@ static int g_dbg_ty = 0;      // dbg_spawn: which creature the System menu DEBUG
 static int g_sys_sel = 0, g_sys_conf = 0, g_menu_quit = 0, g_menu_spawn = 0, g_menu_rest = 0, g_inv_use_vial = 0;
 static char g_quick[6][24]; static int g_quick_sel = 0, g_quick_ready = 0, g_quick_use = 0;
 static char g_stat_pos[64];      // status_coords: the player's x y z (m) under LOCATION
-static char g_stat_l[7][24], g_stat_v[7][40], g_sys_txt[32][32]; static int g_menu_snap = 0, g_menu_ps1 = 0;
-#define INV_TABS 3
+static char g_stat_l[7][24], g_stat_v[7][40], g_sys_txt[34][32]; static int g_menu_snap = 0, g_menu_ps1 = 0;
+#define INV_TABS 6      /* inv_categories: the bag is sorted under the game's own six category icons */
 #define INV_COLS 6
-#define SYS_N 15      // rows shown; SYS_MAP says which text slot / action each one is (vertex snap, left handed and the door tint rows were taken off the menu)
-static const int SYS_MAP[SYS_N] = { 0, 8, 16, 18, 19, 20, 21, 22, 23, 24, 27, 28, 29, 31, 17 };      // the map editor (texture editor, row 30) is off the menu again; the other debug rows (free cam, panel editor, the Gehrman fight trigger) are off; their code is still there
-static const char *INV_TAB_NAME[INV_TABS] = { "ITEMS", "KEY ITEMS", "MATERIALS" };
+#define SYS_N 17      // rows shown; SYS_MAP says which text slot / action each one is (vertex snap, left handed and the door tint rows were taken off the menu)
+static const int SYS_MAP[SYS_N] = { 0, 8, 16, 18, 19, 20, 32, 33, 21, 22, 23, 24, 27, 28, 29, 31, 17 };      /* (32 = the frame rate cap; the debug panel and map editor rows are off the menu) */      // the map editor (texture editor, row 30) is off the menu again; the other debug rows (free cam, panel editor, the Gehrman fight trigger) are off; their code is still there
+static const char *INV_TAB_NAME[INV_TABS] = { "CONSUMABLES", "KEY ITEMS", "BLOOD STONES", "RIGHT HAND", "LEFT HAND", "ATTIRE" };
+static const char *INV_TAB_ICON[INV_TABS] = { "T_IconCateg_Cons", "T_IconCateg_Key", "T_IconCateg_BloodStones", "T_IconCateg_RWeap", "T_IconCateg_LWeap", "T_IconCateg_Attire" };      /* (in itemicons.bin: add_categ_icons.sh puts them there) */
 typedef struct { char key[24]; char label[28]; int cat, n, kind; } InvRow;           // kind 0 = an entry of g_inv, 1 = blood vials, 2 = quicksilver bullets (their counts live in the game loop), 3 = "empty the slot"
 static void quick_ready(void) { if (g_quick_ready) return; g_quick_ready = 1; memset(g_quick, 0, sizeof g_quick); g_quick_sel = 0; }
 static int quick_row(const char *key, int vials, int bullets, InvRow *r) {      // fills r for the item a quick slot holds; 0 when the slot is empty
@@ -734,7 +738,7 @@ static int g_quick_mono(void) { quick_ready(); const char *k = g_quick[g_quick_s
 static void quick_cycle(void) { quick_ready(); for (int k = 1; k <= 6; k++) { int i = (g_quick_sel + k) % 6; if (g_quick[i][0] && strcasecmp(g_quick[i], "bloodvial") && strcasecmp(g_quick[i], "quicksilverbullet")) { g_quick_sel = i; return; } } }
 // ---- weapons: right hand R1 / R2, left hand L1 / L2 ----
 typedef struct { const char *name, *abbr, *desc; int hand; float mult; int gun, cost; } WpnDef;      // hand 0 right, 1 left; mult = damage multiplier; gun = fires with L1 for `cost` bullets
-static const WpnDef WPN[12] = {
+static WpnDef WPN[NWPN] = {
     { "SAW CLEAVER", "SAW", "A trick weapon.\nPress {SQUARE} to transform it.", 0, 1.0f, 0, 0 },
     { "HUNTERS AXE", "AXE", "Hits harder than the cleaver.\n{SQUARE} grips it two-handed. Hold {R1} to spin.", 0, 1.2f, 0, 0 },
     { "BLOODSPEAR", "SPEAR", "A long spear that hits hard.\nPress {SQUARE} to transform it.", 0, 1.1f, 0, 0 },
@@ -747,22 +751,41 @@ static const WpnDef WPN[12] = {
     { "TORCH", "TORCH", "A lit torch.\nNothing to fire. {L1} does nothing yet.", 1, 1.0f, 0, 0 },
     { "THREADED CANE", "CANE", "A whip-like cane, quick and light.\nPress {SQUARE} to transform it.", 0, 0.9f, 0, 0 },
     { "TONITRUS", "TONI", "A sparking mace that hits hard.\n{SQUARE} charges it with lightning for 12 seconds.", 0, 1.3f, 0, 0 },
+    { "", "", "", 0, 1.0f, 0, 0 },      /* 12: not a weapon (the cane's open form is drawn under this id) */
+    { "", "", "", 0, 1.0f, 0, 0 },      /* 13: not a weapon (the Tonitrus' lightning cards) */
+    { "BURIAL BLADE", "BURIAL", "Gehrman's curved sword.\n{SQUARE} opens it into a scythe.", 0, 1.15f, 0, 0 },
+    { "HOLY MOONLIGHT SWORD", "MOON", "A greatsword of pale light.\n{SQUARE} grips it in both hands: every third swing throws a wave of moonlight.", 0, 1.25f, 0, 0 },      /* 15: moonlight_sword (weapons.bin built with the Moonlight folder) */
+    { "", "", "", 0, 1.0f, 0, 0 },      /* 16: not a weapon (the Moonlight Sword with its blade of light out is drawn under this id) */
 };
-static int g_wown[12] = { 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0 };      // weapon_shop: weapons you own (start: saw cleaver, fists, hunter pistol); the rest are bought from the messengers in the dream
-static const int WPN_PRICE[12] = { 2000, 4000, 5000, 0, 0, 1500, 1800, 0, 4500, 0, 2000, 5500 };      // 0 = never sold (fists, blades of mercy, double barrel shotgun: found in the map, torch)
+static int g_wown[NWPN] = { 1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0 };      // weapon_shop: weapons you own (start: saw cleaver, fists, hunter pistol); the rest are bought from the messengers in the dream
+static int WPN_PRICE[NWPN] = { 2000, 4000, 5000, 0, 0, 1500, 1800, 0, 4500, 0, 2000, 5500, 0, 0, 10000, 12000, 0 };      // 0 = never sold (fists, blades of mercy, double barrel shotgun: found in the map, torch)
 static int g_cb_dead;      // forward declaration (defined with the Cleric Beast code)
+static int amg_dead_get(void); static int g_rush, g_amg_rez;      /* forward declarations (Amygdala kill flag) */
 static void save_write(int force);      // cb_saved: forward declaration
 static int g_gas_redo, g_cb_redo;      // rematch: a bloodstone chunk offered at the Dream's lantern brings the fallen bosses back for another fight (saved); the story flags stay as they are
 #define GAS_ALIVE (!g_gas_dead || g_gas_redo)
-#define CB_ALIVE (!g_cb_dead || g_cb_redo)
+static int rom_map(void); static int moon_map(void); static int rl_map(void);      // rom_arena: the Byrgenwerth lake arena (level_romarena.bin): the Amygdala fights there, the Cleric Beast stays on his bridge
+#define CB_ALIVE (rom_map() ? (moon_map() || rl_map() || g_rush || !amg_dead_get() || g_amg_rez) : (!g_cb_dead || g_cb_redo))      /* rom_arena: the Amygdala is back every time you enter */
+static int g_rom_seen, g_rom_seen_s;      /* g_rom_seen_s: seen the arena in this run of the game (not saved): in a new game plus the crater is listed only from that, the other sickroom's note or Rom's death, whatever an older save still says */
+#define ROM_LISTED ((g_story & 32) || (g_ng > 0 ? (g_rom_seen_s || (g_story & 4)) : g_rom_seen))      /* g_rom_seen: you have been to the Byrgenwerth arena (the Amygdala's door in the Dream took you there): kept in the save */
+static int g_gehr_oedon;      /* gehr_oedon: he has told you to go to the Oedon Chapel (this session) */
+static int g_story, g_rl_drop, g_rl_wake; static float g_rl_dt;      /* story: bit 1 = Gilbert fell (the Lost Hunter Badge is yours), 2 = the chapel note is read (Moonside Lake and the Moonlight Sword are open), 4 = Rom is dead (the sky bleeds, Gehrman can be fought), 8 = you have been in the Oedon Chapel; saved in story.txt */
+static int g_ml_have, g_moon_seen, g_ml_now, g_ml_chain, g_ml_fire; static float g_ml_dmg; static float g_rm_vis = 1.0f; static int g_rm_stage, g_rm_tp, g_rm_fade; static void rom_assets(void);      /* rom_fight: g_rm_stage 0 = she does not attack (until 75% health), 1, 2 = after her first / second vanishing; g_rm_tp = a vanishing is due; g_rm_fade 1 out, 2 in; g_rm_vis how much of her shows */
+static int g_rom_have, g_spd_have; static void rom_reset(void); static int g_rm_sp[8], g_rm_nsp;      /* g_rm_sp: the enemy slots her children stand in */      /* moonlight_sword: g_ml_have = weapons.bin carries it; g_moon_seen = you have stood before the Moon Presence (kept in the save): from then on the messengers sell it; moonlight_now.txt on the card sells it from the start, for testing */
+static int g_shop_unl;      /* shop_unlocks: what the messengers sell once Gascoigne (1), the Cleric Beast (2) or the Moonlight story (4) has happened: kept across new game plus (saved) */
+#define SH_GAS (g_gas_dead || (g_shop_unl & 1))
+#define SH_CB (g_cb_dead || (g_shop_unl & 2))
+static int g_burial_test, g_gh_beaten, g_burial_now;      /* g_gh_beaten: Gehrman has been defeated at least once (kept in the save, so respawned or new-game-plus bosses do not lock the Burial Blade again) */
 static int wpn_stocked(int w) {      // weapon_shop: what the messengers sell. always: saw cleaver, hunter pistol, threaded cane, blunderbuss | after the Cleric Beast or Gascoigne: bloodspear, flamesprayer, tonitrus | after Gascoigne: hunter axe
     if (w == 0 || w == 5 || w == 10 || w == 6) return 1;      // (the Blades of Mercy and Eileen's clothes are sold for insight only, once you hold the Crow Hunter Badge)
     if (w == 11) return 0;      // the Tonitrus is sold for insight only
-    if (w == 2 || w == 8) return g_gas_dead || g_cb_dead;
-    if (w == 1) return g_gas_dead;
+    if (w == 15) return g_ml_have && ((g_story & 2) || (g_shop_unl & 4) || g_ml_now);      /* moonlight_sword */
+    if (w == 14) return g_burial_test && (g_gh_beaten || g_gh_dead || g_gh_redo || g_burial_now);      /* the Burial Blade is sold once Gehrman has been beaten for the first time (burial_now.txt on the card: for testing, sold from the start) */
+    if (w == 2 || w == 8) return SH_GAS || SH_CB;
+    if (w == 1) return SH_GAS;
     return 0;
 }
-static int g_wlv[12];                                  // wpn_upgrade: each weapon's level (+0..+10)
+static int g_wlv[NWPN];                                  // wpn_upgrade: each weapon's level (+0..+10)
 typedef struct { const char *key, *label; int cost, amt, kind, a, b; } InsItem;      // kind 0 a bag item, 1 a weapon (a = weapon number), 2 a hat (a = number), 3 a garb (a = number); b = what has to be true first (0 nothing, 1 you have met Eileen, 2 Henryk has fallen, 3 a boss has fallen)
 static const InsItem INS_ITEMS[] = {      // ins_shop: the second messenger in the Hunter's Dream sells these for insight
     { "FirePaper", "FIRE PAPER", 1, 1, 0, 0, 0 }, { "LightningPaper", "BOLT PAPER", 1, 1, 0, 0, 0 },
@@ -787,23 +810,30 @@ static int g_ng = 0, g_ng_wipe = 0, g_ng_conf = 0, g_ngp_go = 0;      // new gam
 static float ng_hpm(void) { return 1.0f + 0.5f * (g_ng > 8 ? 8 : g_ng); }      // enemy health (and echo reward) multiplier: +50% per cycle
 static int g_si_boss[3];      // bosses_needed: per save slot, how many of the four bosses that hunter has defeated (read by the title menu)
 static float ng_dmm(void) { return 1.0f + 0.5f * (g_ng > 8 ? 8 : g_ng); }      // damage enemies deal: +50% per cycle
+static void story_save(void) { char p_[96]; slot_file(p_, sizeof p_, "story", "txt", g_slot); FILE *f_ = fopen(p_, "w"); if (f_) { fprintf(f_, "%d\n", g_story); fclose(f_); } }
+static void story_load(void) { char p_[96]; slot_file(p_, sizeof p_, "story", "txt", g_slot); g_story = 0; FILE *f_ = fopen(p_, "r"); if (f_) { int v_; if (fscanf(f_, "%d", &v_) == 1) g_story = v_; fclose(f_); } }
+static int chapel_note_pos(float *x_, float *y_) { if (strcasecmp(cur_map, "oedonchapel") || !(g_story & 1) || (g_story & 2) || nLamps < 1) return 0; *x_ = lamps_[0].x; *y_ = lamps_[0].y + 1.8f; return 1; }      /* chapel_note: the note lies on the floor by the lantern once Gilbert is dead, until it is read */
+static int sick2_note_pos(float *x_, float *y_) { if (strcasecmp(cur_map, "ic_sickroom2") || (g_story & 32)) return 0; *x_ = -25.3f; *y_ = 6.08f; return 1; }      /* sick2_note: the glow on the table in the other sickroom, until its note is read */
 static int g_gil_gone;      // gil_gate: the estate doors have been opened, so Gilbert no longer talks through his window
 static int g_lamp_ui, g_lamp_sel, g_lamp_go, g_lamp_i, g_lamp_dream, g_lamp_ws;      // lamp_menu: the lantern's menu (rest / travel / leave); go: 1 rest, 2 rest and travel
-static float wup_mul(int w) { return (w >= 0 && w < 12) ? 1.0f + 0.11f * g_wlv[w] : 1.0f; }      // each upgrade level adds 11% damage (+10 = x2.1)
+static float wup_mul(int w) { return (w >= 0 && w < NWPN) ? 1.0f + 0.11f * g_wlv[w] : 1.0f; }      // each upgrade level adds 11% damage (+10 = x2.1)
 static int g_eq[4] = { 0, -1, 5, -1 }, g_eq_r = 0, g_eq_l = 2;       // slots: R1 R2 L1 L2 (index into WPN, -1 empty); g_eq_r / g_eq_l = the slot in use (0 / 1 and 2 / 3)
 static int wpn_r(void) { return g_eq[g_eq_r]; }
 static int wpn_l(void) { return g_eq[g_eq_r] == 4 ? -1 : g_eq[g_eq_l]; }      // bom_hands: the Blades of Mercy take both hands, so nothing is held in the left while they are the weapon in use
 static int wpn_r_cleaver(void) { return wpn_r() == 0; }
+#define BB_FAST 1.2f      /* the opened Burial Blade swings this much faster than the axe's two-handed swings (its swing animations are played faster, and the chain window opens a little sooner) */
+#define wr_axe_ (wpn_r() == 1 || wpn_r() == 15)      /* moonlight_sword: it is handled exactly like the Hunter's Axe (one-handed swings; SQUARE grips it in both hands for the heavy two-handed set) */
+#define w2h_open_ ((wpn_r() == 1 || wpn_r() == 14 || wpn_r() == 15) && cl_open)      /* held in both hands: the Hunter's Axe, and the Burial Blade once it is opened into a scythe (cl_open) */
 static int wpn_r_xform(void);      // cleaver, or the blood spear once its transform animations are loaded
 static float g_cfx_t = 0.0f;      // charge_fx: the white sparkle after a heavy charge is fully wound (seconds left)
 static float g_toni_t = 0.0f;       // seconds of Tonitrus charge left (12 s after SQUARE)
 #define TONI_CHARGE 12.0f
 static float g_paper_t = 0.0f; static int g_paper_kind = 0, g_paper_w = -1; static int g_ic_ov = 0;      /* fire / lightning paper: 1 fire, 2 lightning; seconds left, the weapon it is on, icon overlay flag */
 #define PAPER_SECS 90.0f
-static float wpn_rmult(void) { int w = wpn_r(); int sw_ = (w >= 0 && w < 12) ? w : 3; return (1.0f + WSCAL[sw_][0] * g_sb + WSCAL[sw_][1] * g_kb) * (w < 0 ? WPN[3].mult : (w == 11 && g_toni_t > 0.0f ? WPN[w].mult * 1.6f : WPN[w].mult)) * wup_mul(w); }
+static float wpn_rmult(void) { int w = wpn_r(); int sw_ = (w >= 0 && w < NWPN) ? w : 3; return (1.0f + WSCAL[sw_][0] * g_sb + WSCAL[sw_][1] * g_kb) * (w < 0 ? WPN[3].mult : (w == 11 && g_toni_t > 0.0f ? WPN[w].mult * 1.6f : WPN[w].mult)) * wup_mul(w); }
 static float wpn_stam(void) {      // stam_scale: what a swing costs: each weapon has its own weight, and Endurance lowers it (about -0.5% per point above 10, at most -30%)
-    static const float W[12] = { 1.0f, 1.3f, 1.1f, 0.5f, 0.8f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.85f, 1.4f };      // cleaver axe spear fist blades . . . . . cane tonitrus
-    int w = wpn_r(); float k = (w >= 0 && w < 12) ? W[w] : 1.0f, e = 1.0f - 0.005f * (float)(g_stat[1] - 10); if (e < 0.7f) e = 0.7f; if (e > 1.0f) e = 1.0f;
+    static const float W[NWPN] = { 1.0f, 1.3f, 1.1f, 0.5f, 0.8f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.85f, 1.4f, 1.0f, 1.0f, 1.15f, 1.3f, 1.0f };      // cleaver axe spear fist blades . . . . . cane tonitrus
+    int w = wpn_r(); float k = (w >= 0 && w < NWPN) ? W[w] : 1.0f, e = 1.0f - 0.005f * (float)(g_stat[1] - 10); if (e < 0.7f) e = 0.7f; if (e > 1.0f) e = 1.0f;
     return k * e;
 }
 static float wpn_lmult(void) { int w = wpn_l(); return g_gmul * (w < 0 ? 1.0f : WPN[w].mult) * wup_mul(w); }
@@ -839,14 +869,14 @@ static int store_near_r(float x, float y, float z, float r) {
     if (!g_store_set) { g_store_pt[0] = 32.79f; g_store_pt[1] = -22.55f; g_store_pt[2] = 4.55f; g_store_set = 1; }      // default spot (set by the developer); storage_pos.txt overrides it
     return g_store_set && hypotf(x - g_store_pt[0], y - g_store_pt[1]) < r && fabsf(z - g_store_pt[2]) < 1.8f;
 }
-static int g_wstore[12], g_astore[2][10], g_store_ui, g_store_sel;      // storage: weapons / attire left in the Hunter's Workshop (they stay yours, but no longer weigh on you: the hidden equip load only counts what you carry)
+static int g_wstore[NWPN], g_astore[2][10], g_store_ui, g_store_sel;      // storage: weapons / attire left in the Hunter's Workshop (they stay yours, but no longer weigh on you: the hidden equip load only counts what you carry)
 static int g_att_own[2][10] = { { 0, 1 }, { 0, 0, 0, 1 } };      // attire_shop: hats [0] / garbs [1] you own: bare head, black hood / foreign garb to start
 static int g_doll_hi;      // doll_secret: the Crow said 'Tell the doll I said hello' (unlocks the Doll's attire in the shop)
 static const int ATT_PRICE[2][10] = { { 1800, 0, 0, 3000, 4000, 0, 0, 2400, 2000, 2500 }, { 4000, 0, 6000, 0, 9000, 8000, 0, 3500, 0, 0 } };      // 0 = not sold
 static int att_stocked(int slot, int k) {      // attire_shop: what the messengers sell and when it becomes available
     if (ATT_PRICE[slot][k] <= 0 || (k > 0 && !g_att_has[slot][k])) return 0;
-    if (slot == 0) switch (k) { case 0: return 1; case 2: return 0; case 4: return g_gas_dead; case 7: case 8: case 9: return stat_level() >= 15;      /* hat 2 (Crowfeather) is sold for insight */ case 3: return g_doll_hi; }
-    else switch (k) { case 0: return 1; case 1: return 0; case 2: return g_doll_hi; case 4: return g_gas_dead; case 5: return 0; case 7: return g_gas_dead || g_cb_dead; }
+    if (slot == 0) switch (k) { case 0: return 1; case 2: return 0; case 4: return SH_GAS; case 7: case 8: case 9: return stat_level() >= 15;      /* hat 2 (Crowfeather) is sold for insight */ case 3: return g_doll_hi; }
+    else switch (k) { case 0: return 1; case 1: return 0; case 2: return g_doll_hi; case 4: return SH_GAS; case 5: return 0; case 7: return SH_GAS || SH_CB; }
     return 0;
 }
 static int badge_have(void);
@@ -857,7 +887,7 @@ static int shop_items(int *ids) {
     int n = 0;
     if (g_gift) { if (g_gift == 1) { ids[n++] = 100; ids[n++] = 110; } else { ids[n++] = 105; ids[n++] = 106; } ids[n++] = -1; return n; }      // gift_msgr: R: Saw Cleaver / Threaded Cane, L: Hunter Pistol / Blunderbuss
     ids[n++] = 0; ids[n++] = 1; ids[n++] = 2; ids[n++] = 3; ids[n++] = 4; ids[n++] = 5; ids[n++] = 6; ids[n++] = 7; ids[n++] = 8; ids[n++] = 9;      /* throwing knife */ /* fire paper, lightning paper */ // shop_meds: 2 antidote, 3 sedative; 4 pebbles (5 at a time), 5 molotov cocktail
-    for (int w = 0; w < 12; w++) if (wpn_stocked(w)) ids[n++] = 100 + w;
+    for (int w = 0; w < NWPN; w++) if (wpn_stocked(w)) ids[n++] = 100 + w;
     for (int k = 0; k < 10; k++) if (att_stocked(0, k)) ids[n++] = 200 + k;
     for (int k = 0; k < 10; k++) if (att_stocked(1, k)) ids[n++] = 300 + k;
     ids[n++] = -1; return n;
@@ -905,16 +935,28 @@ static int inv_rows(InvRow *out, int tab, int vials, int bullets, int assign) {
     }
     if (assign >= 10) {                                                   // a weapon list for slot assign-10: right hand slots 0 1, left hand slots 2 3
         int hand = (assign - 10) >= 2;
-        for (int w = 0; w < 12; w++) if (WPN[w].hand == hand && w != 3 && g_wown[w]) { memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "%d", w); snprintf(out[n].label, sizeof out[n].label, "%s", WPN[w].name); out[n].kind = 4; n++; }
+        for (int w = 0; w < NWPN; w++) if (WPN[w].hand == hand && w != 3 && g_wown[w]) { memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "%d", w); snprintf(out[n].label, sizeof out[n].label, "%s", WPN[w].name); out[n].kind = 4; n++; }
         return n;
     }
     if (tab == 0 && !assign) {
         memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "bloodvial"); snprintf(out[n].label, sizeof out[n].label, "BLOOD VIAL"); out[n].cat = 0; out[n].n = vials; out[n].kind = 1; n++;
         memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "quicksilverbullet"); snprintf(out[n].label, sizeof out[n].label, "QUICKSILVER BULLET"); out[n].cat = 1; out[n].n = bullets; out[n].kind = 2; n++;
     }
+    if (!assign && (tab == 3 || tab == 4)) {      /* inv_categories: the weapons you own, by hand (to look at: they are equipped from the equipment screen) */
+        for (int w = 0; w < NWPN; w++) if (WPN[w].name[0] && WPN[w].hand == (tab == 4) && w != 3 && g_wown[w]) { memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "%d", w); snprintf(out[n].label, sizeof out[n].label, "%s", WPN[w].name); out[n].kind = 4; n++; }
+        return n;
+    }
+    if (!assign && tab == 5) {      /* the attire you own: hats first (cat 20), then garbs (cat 21) */
+        for (int slot = 0; slot < 2; slot++) { int cnt = slot ? 8 : 10;
+            for (int k = 0; k < cnt; k++) if (k == 0 ? g_att_own[slot][0] : (g_att_has[slot][k] && g_att_own[slot][k])) { memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "%d", k); snprintf(out[n].label, sizeof out[n].label, "%s", slot ? ATT_BODY_N[k] : ATT_HAT_N[k]); out[n].kind = 5; out[n].cat = 20 + slot; n++; } }
+        return n;
+    }
     for (int i = 0; i < MAX_INV; i++) {
         if (g_inv[i].n <= 0) continue;
-        if (trans_name(g_inv[i].key) || trans_name(g_inv[i].label)) continue;      // bt_hidden: the Bullet Transfuser is never listed: you either have it (and the SELECT shortcut works) or you don't
+        if (trans_name(g_inv[i].key) || trans_name(g_inv[i].label)) {      /* bt_shown: the Bullet Transfuser is listed with the key items now (it used to be hidden) */
+            if (tab != 1 || assign) continue;
+            memset(&out[n], 0, sizeof out[n]); snprintf(out[n].key, 24, "%s", g_inv[i].key); snprintf(out[n].label, sizeof out[n].label, "%s", "BULLET TRANSFUSER"); out[n].cat = 3; out[n].n = g_inv[i].n; out[n].kind = 0; n++; continue;
+        }
         if (g_inv[i].cat == 4) continue;      // attire_hidden: garbs and hats are worn from the attire menu, never listed as items
         { int sl_, k_; if (att_from_item(g_inv[i].key, g_inv[i].label, &sl_, &k_) && g_inv[i].cat >= 4) { g_att_own[sl_][k_] = 1; g_inv[i].n = 0; continue; } }      // a garb filed under another category is converted into wearable attire
         int c = inv_cat_fix(g_inv[i].key, g_inv[i].cat), t = c == 3 ? 1 : (c >= 4 && c <= 6) ? 2 : 0;
@@ -928,7 +970,8 @@ static const char *inv_desc(const InvRow *r) {         // item text in the dialo
     if (r->kind == 2) return "Special bullets used with hunter firearms.\nTheir strength depends on your bloodtinge.\nAlways equipped. Fire with {L1}.";
     if (r->kind == 3) return "Takes what is in this slot out.";
     if (r->kind == 4) return WPN[atoi(r->key)].desc;
-    if (r->kind == 5) return "An article of attire.\nPress {X} to wear it.";
+    if (r->kind == 5) return r->cat >= 20 ? "An article of attire.\nWorn from the attire slots of the equipment screen." : "An article of attire.\nPress {X} to wear it.";
+    if (r->kind == 0 && (trans_name(r->key) || trans_name(r->label))) return "A hunter tool that turns your own blood into bullets.\nPress SELECT: you give up 30% of your full health and get\n5 blood bullets. They are spent before your quicksilver\nbullets and come on top of them, even past the usual limit.\nYou need more health than it costs. The red +5 under the\nbullet counter shows the blood bullets you hold.";
     if (ci_has(r->key, "firepaper")) return "Coarse paper that applies fire to weapons when rubbed.\nLasts 90 seconds. Not for the Tonitrus.";
     if (ci_has(r->key, "knife")) return "Throwing knife with a finely serrated blade.\nOne of the old hunter Henryk's favorite weapons.\n12 damage. Use it from a quick slot.";
     if (ci_has(r->key, "blacksky")) return "Soft eye blessed by a phantasm. Rub the orb and the rock\nwill tumble and soar. Costs one quicksilver bullet and no\nstamina. Needs 16 arcane. Silent, and scales with arcane.";
@@ -942,6 +985,7 @@ static const char *inv_desc(const InvRow *r) {         // item text in the dialo
     if (ci_has(r->key, "monocular")) return "Monocular used to view things up close. Not a hunter's\ntool, but a simple antique. Use it from a quick slot for a\nfirst-person shooting view.";
     if (ci_has(r->key, "brooch")) return "A woman's bright-red brooch, engraved with the name Viola.\nA keepsake. It has no use yet.";
     if (ci_has(r->key, "huntersmark")) return "A dangling, upside-down rune etched in one's mind.\nThe mark of a hunter. Use it from a quick slot to clear your\nblood echoes and wake in the Hunter's Dream.\nRecommend to keep at least one on hand in case you end up where you shouldn't be.";
+    if (ci_has(r->key, "losthunter")) return "A badge left to a hunter who hunts the lost. Earned\nwhen Gilbert fell. It opens the way to the Oedon Chapel,\nwhere a note tells of a lake under a white sky and the\nlantern that falls there. Reading it opens Moonside Lake\nand the Holy Moonlight Sword in the Dream.";
     if (ci_has(r->key, "badge")) return "Badge of a hunter of hunters, who hunts those addled\nwith blood. Opens the insight shop to the Blades of Mercy\nand Eileen's clothes.";
     if (ci_has(r->key, "twin")) return "Two solid shards that form in coldblood.\nEmbedded in weapons at the workshop to fortify them.";
     if (ci_has(r->key, "chunk")) return "A large piece of blood stone, embedded in weapons at the\nworkshop. Offer it at the Dream's lantern to bring the\nfallen bosses back.";
@@ -1346,6 +1390,8 @@ typedef struct {
     int show_alt; int show_pistol; int wsec_i, wsec_lo, hide_w; int tipR, tipL;      // wsec_i = the weapon's mesh section, hide_w = skip drawing it (player only)
     WAnim *wanim; uint32_t nWA; int hand;   // transforming weapon: its own animations; hand = skin bone carrying it (-1: none)
     int wset; float wm[12], wds[3], wde[3]; // current weapon pose (set with weapon_sample)
+    uint8_t *lmb, *lmf;      /* limb_map (the "LMB1" block at the end of a boss file): per bone, which limb it belongs to (0 body, 1 right arm, 2 left arm, 3 legs, 4+ a tail) and how far along that limb it sits (0..255); NULL = the file has none */
+    uint8_t *limp; float limp_d;      /* limb_break: per vertex, how far (0..255 of limp_d metres) a broken limb hangs down; NULL = nothing broken */
 } Char;
 static Char HUNT;
 static Char *CUR = &HUNT;          // the character the hunter_* helpers work on
@@ -1389,6 +1435,7 @@ static uint8_t *g_body_px; static int g_body_w, g_body_h; static uint32_t g_body
 static void hat_match_scale(const double *garb, float *sc) {      // per-channel factor that moves the garb's average colour onto the hat's: only ever darkens (never above 1), never below 0.15
     for (int c = 0; c < 3; c++) { float v = garb[c] > 1.0 ? (float)(g_hat_avg[c] / garb[c]) : 1.0f; sc[c] = v > 1.0f ? 1.0f : (v < 0.15f ? 0.15f : v); }
 }
+static int g_anim_half;      /* anim_half: while set, load_hunter keeps every second frame of each animation (playback blends between frames, so it looks the same and takes half the memory). Used for the big boss models: with all of them loaded the Hunter's Dream ran out of memory and drew without its world */
 static int load_hunter(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) return 0;
@@ -1436,10 +1483,23 @@ static int load_hunter(const char *path) {
             { char *tr = strstr(low, "troll"); while (tr) { tr[2] = '0'; tr = strstr(tr + 1, "troll"); } }      // "TrollAnim_Walk" contains "roll": it isn't a one-shot roll, keep it looping
             H.anim[i].loop = !(strstr(low, "attack") || strstr(low, "hurt") || strstr(low, "roll") || strstr(low, "dodge") || strstr(low, "quickstep") ||
                 strstr(low, "stab") || strstr(low, "combo") || strstr(low, "hitreact") || strstr(low, "death") || strstr(low, "visceral") ||
-                strstr(low, "counter") || strstr(low, "atk0") || strstr(low, "slam") || strstr(low, "damage") || strstr(low, "pull"));      // lever_loop: Switch_SwitchPull plays once
+                strstr(low, "counter") || strstr(low, "atk0") || strstr(low, "slam") || strstr(low, "clawflurry") || strstr(low, "whiplash") || strstr(low, "spinsweep") || strstr(low, "legstomp") || strstr(low, "armtear") || strstr(low, "arcanebeam") || strstr(low, "backhop") || strstr(low, "damage") || strstr(low, "pull"));      // lever_loop: Switch_SwitchPull plays once
         }
+        if (g_anim_half && H.anim[i].nf >= 8 && H.anim[i].fps > 40.0f) {      /* (only animations stored at 60 frames a second: the Moon Presence's are already at 30) */
+            uint32_t nf0 = H.anim[i].nf, nf1 = (nf0 - 1) / 2 + 1 + ((nf0 & 1) ? 0 : 1); const float *src_ = (const float *)(d + p);      /* every second frame, and always the last one */
+            H.anim[i].m = malloc(per * nf1 * sizeof(float));
+            for (uint32_t k_ = 0; k_ < nf1; k_++) { uint32_t s_ = k_ * 2; if (s_ > nf0 - 1) s_ = nf0 - 1; memcpy(H.anim[i].m + (size_t)k_ * per, (const uint8_t *)src_ + (size_t)s_ * per * sizeof(float), per * sizeof(float)); }
+            H.anim[i].nf = nf1; H.anim[i].fps *= 0.5f; p += per * nf0 * sizeof(float);
+        } else {
         H.anim[i].m = malloc(per * H.anim[i].nf * sizeof(float));
         memcpy(H.anim[i].m, d + p, per * H.anim[i].nf * sizeof(float)); p += per * H.anim[i].nf * sizeof(float);
+        }
+    }
+    H.lmb = H.lmf = NULL;
+    if (p + 8 <= (size_t)sz && memcmp(d + p, "LMB1", 4) == 0) {      /* limb_map */
+        uint32_t n_; memcpy(&n_, d + p + 4, 4);
+        if (n_ == H.nB && p + 8 + 2 * (size_t)n_ <= (size_t)sz) { H.lmb = malloc(n_ ? n_ : 1); H.lmf = malloc(n_ ? n_ : 1); if (H.lmb && H.lmf) { memcpy(H.lmb, d + p + 8, n_); memcpy(H.lmf, d + p + 8 + n_, n_); } else { H.lmb = H.lmf = NULL; } }
+        p += 8 + 2 * (size_t)n_;
     }
     H.nWA = 0; H.wanim = NULL; H.hand = -1;
     for (uint32_t v = 0; v < H.nV; v++) if (H.vb[v * 4 + 3] == 1) { H.hand = H.vb[v * 4]; break; }
@@ -1484,15 +1544,16 @@ static int load_hunter(const char *path) {
 }
 
 // ---- extra weapon meshes (weapons.bin, "BBW1", made by convert_weapons.py): appended to the Hunter as sections with flag 16 + weapon id, glued to hand_r / hand_l
-static WAnim *g_cl_wa; static uint32_t g_cl_n; static WAnim *g_xa[12]; static uint32_t g_xn[12];      // g_xa[weapon id]: its own transform animations (weapons.bin); the cleaver's live in hunter.bin
+static WAnim *g_cl_wa; static uint32_t g_cl_n; static WAnim *g_xa[NWPN]; static uint32_t g_xn[NWPN];      // g_xa[weapon id]: its own transform animations (weapons.bin); the cleaver's live in hunter.bin
 #define g_spr_n g_xn[2]
 #define g_spr_wa g_xa[2]
       // transform animation sets: cleaver (hunter.bin), blood spear (weapons.bin)
-static int wpn_r_xform(void) { int w = wpn_r(); return w == 0 || (w > 1 && w < 12 && g_xn[w] > 0); }      // the axe does not transform: SQUARE just grips it with two hands
+static int wpn_r_xform(void) { int w = wpn_r(); return w == 0 || (w > 1 && w < NWPN && g_xn[w] > 0); }      // the axe does not transform: SQUARE just grips it with two hands
 typedef struct { char name[32]; float fps; uint32_t nf; float *p; } VAnim;      // baked vertex animation (the cane's whip form): nf frames of nV x 3 floats
 static VAnim g_va[4]; static int g_nva, g_va_tr = -1, g_va_id = -1; static uint32_t g_cv0, g_cnv;
 static int g_cane_open = 0;       // the cane is shown in its second form (changes half way through its transform)
 static int g_pistol_ext = 0;      // weapons.bin carries the pistol (tiltable): the one inside hunter.bin stays hidden
+static int g_ml_t_have;      /* moonlight_sword: weapons.bin carries the second form */
 static int g_axe2h = 0;           // the Hunter's Axe is held in both hands (the left-hand weapon is put away)
 static uint32_t g_ax_v0, g_ax_nv; static float *g_ax_rest0, g_ax_axis[3], g_ax_cur = 0.0f, g_ax_k = 1.0f, g_ax_off = 0.0f; static int g_ax_ready = 0;
 static int g_hide_wpn;      // ladder_hide: set while he climbs: both hands are busy, so the weapons are put away
@@ -1504,6 +1565,8 @@ static int wsec_vis(int w) {      // is the weapon (or attire piece) with this i
     if (w >= 40) return g_att[0] == w - 40;                          // a hat from attire.bin
     if (w >= 20) return g_att[1] == w - 20;                          // a body outfit from attire.bin
     if (w == 12) return wpn_r() == 10 && g_cane_open;                // the threaded cane's open (whip) form
+    if (w == 16) return wpn_r() == 15 && g_axe2h && g_ml_t_have;      /* moonlight_sword: gripped in both hands, the blade of light is out */
+    if (w == 15 && wpn_r() == 15 && g_axe2h && g_ml_t_have) return 0;
     if (w == 10 && g_cane_open) return 0;
     if (w == wpn_r()) return 1;                                   // right-hand weapon (the Blades of Mercy carry the id on both blades)
     if (w == wpn_l()) return 1;                                   // left-hand weapon: always in the hand, like the pistol is
@@ -1518,7 +1581,7 @@ static int hunter_add_weapons(const char *path) {
     if (!d || fread(d, 1, sz, f) != (size_t)sz) { fclose(f); free(d); return 0; }
     fclose(f);
     if (sz < 8 || memcmp(d, "BBW1", 4) != 0 || !H.ok) { free(d); return 0; }
-    static const struct { const char *n; int id; } IDS[] = { { "pistol", 5 }, { "axe", 1 }, { "bloodspear", 2 }, { "bom_r", 4 }, { "bom_l", 4 }, { "blunderbuss", 6 }, { "dbshotgun", 7 }, { "flamesprayer", 8 }, { "torch", 9 }, { "cane", 10 }, { "cane_t", 12 }, { "tonitrus", 11 } };
+    static const struct { const char *n; int id; } IDS[] = { { "pistol", 5 }, { "axe", 1 }, { "bloodspear", 2 }, { "bom_r", 4 }, { "bom_l", 4 }, { "blunderbuss", 6 }, { "dbshotgun", 7 }, { "flamesprayer", 8 }, { "torch", 9 }, { "cane", 10 }, { "cane_t", 12 }, { "tonitrus", 11 }, { "burial", 14 }, { "moonlight", 15 }, { "moonlight_t", 16 } };
     int hand_r = H.wbone, hand_l = -1;
     if (g_wadd_only) { if (H.nAt < 2) { free(d); return 0; } hand_r = H.nB; hand_l = H.nB + 1; }      // the two extra skin bones after the attire's own are hand_r and hand_l
     if (!g_wadd_only) for (uint32_t i = 0; i < H.nS; i++) if (H.sec[i].flag == 2 && H.sec[i].count) { hand_l = H.vb[H.idx[H.sec[i].start] * 4]; break; }
@@ -1554,6 +1617,8 @@ static int hunter_add_weapons(const char *path) {
         if (p > (size_t)sz) break;
         int gid = -1; for (unsigned k = 0; k < sizeof IDS / sizeof *IDS; k++) if (!strcmp(IDS[k].n, name)) gid = IDS[k].id;
         if (gid < 0 || H.nV + nV > 65535 || (g_wadd_only && gid != 4)) continue;
+        if (gid == 15 && !g_wadd_only) g_ml_have = 1;
+        if (gid == 16 && !g_wadd_only) g_ml_t_have = 1;
         uint32_t t0 = H.nT, s0 = H.nS, v0 = H.nV, i0 = H.nI; int share_ = -1;
         { static int bomt_ = -1; if (!g_wadd_only) bomt_ = -1; else if (nT == 1) { if (bomt_ >= 0) share_ = bomt_; else bomt_ = (int)t0; } }      // eil_bom: the second blade reuses the first one's texture
         if (share_ < 0) { H.tex = realloc(H.tex, (size_t)(H.nT + nT) * sizeof(GLuint)); glGenTextures(nT, H.tex + t0); }
@@ -1608,7 +1673,7 @@ static int hunter_add_weapons(const char *path) {
                 ok++;
             }
             int gx = -1; for (unsigned k = 0; k < sizeof IDS / sizeof *IDS; k++) if (!strcmp(IDS[k].n, nm)) gx = IDS[k].id;
-            if (gx > 0 && gx < 12 && ok) { g_xa[gx] = wa; g_xn[gx] = ok; } else free(wa);
+            if (gx > 0 && gx < NWPN && ok) { g_xa[gx] = wa; g_xn[gx] = ok; } else free(wa);
         }
     }
     if (p + 8 <= (size_t)sz && memcmp(d + p, "VAN1", 4) == 0) {               // baked vertex animations (the cane's whip form)
@@ -1826,7 +1891,7 @@ static int hunter_add_anims(const char *path) {
         HAnim a; memset(&a, 0, sizeof a); memcpy(a.name, d + p, 32); a.name[31] = 0; memcpy(&a.fps, d + p + 32, 4); memcpy(&a.nf, d + p + 36, 4); memcpy(&a.tx, d + p + 40, 4); memcpy(&a.ty, d + p + 44, 4); p += 48;
         size_t bytes = per * a.nf * sizeof(float); if (p + bytes > (size_t)sz) break;
         a.m = malloc(bytes); memcpy(a.m, d + p, bytes); p += bytes;
-        { char low[32]; for (int c = 0; c < 32; c++) low[c] = (char)tolower((unsigned char)a.name[c]); a.loop = strstr(low, "idle") || strstr(low, "loop") || strstr(low, "run") || strstr(low, "walk"); }
+        { char low[32]; for (int c = 0; c < 32; c++) low[c] = (char)tolower((unsigned char)a.name[c]); a.loop = strstr(low, "idle") || strstr(low, "loop") || strstr(low, "run") || strstr(low, "walk") || (strstr(low, "sprint") && !strstr(low, "attack")); }      /* sprint: the two-handed sprint must loop, not hold its last frame */
         H.anim = realloc(H.anim, (size_t)(H.nA + 1) * sizeof(HAnim)); H.anim[H.nA++] = a; added++;
     }
     free(d); return added;
@@ -1974,10 +2039,12 @@ static void gh_blade_pose(int a, float f) {      // the spear's blade at fractio
     if (H.wset) for (int k = 0; k < 3; k++) H.wm[3 + 4 * k] += g_gh_boff[k] * 0.01f * f;
 }
 
-static float g_ab[3]; static int g_ab_ld;      // axe_boff: ux0:data/bbpsx/axe_boff.txt = "x y z" (cm, in the weapon's bind frame): moves the folded axe's moving part along its haft so the two halves of the handle meet (Gascoigne, Gehrman); tune without a rebuild
-static void axe_boff_apply(void) { if (!g_ab_ld) { g_ab_ld = 1; FILE *f = fopen("ux0:data/bbpsx/axe_boff.txt", "r"); if (f) { if (fscanf(f, "%f %f %f", &g_ab[0], &g_ab[1], &g_ab[2]) < 3) g_ab[0] = g_ab[1] = g_ab[2] = 0.0f; fclose(f); } } if (H.wset) for (int k = 0; k < 3; k++) H.wm[3 + 4 * k] += g_ab[k] * 0.01f; }
+static float g_ab[6]; static int g_ab_ld;      // axe_boff: ux0:data/bbpsx/axe_boff.txt = "x y z" (cm, in the weapon's bind frame): moves the folded axe's moving part along its haft so the two halves of the handle meet (Gascoigne, Gehrman); tune without a rebuild
+static void axe_boff_apply(int open_) { if (!g_ab_ld) { g_ab_ld = 1; FILE *f = fopen("ux0:data/bbpsx/axe_boff.txt", "r"); if (f) { int n_ = fscanf(f, "%f %f %f %f %f %f", &g_ab[0], &g_ab[1], &g_ab[2], &g_ab[3], &g_ab[4], &g_ab[5]); if (n_ < 3) g_ab[0] = g_ab[1] = g_ab[2] = 0.0f; if (n_ < 6) g_ab[3] = g_ab[4] = g_ab[5] = 0.0f; fclose(f); } } if (H.wset) for (int k = 0; k < 3; k++) H.wm[3 + 4 * k] += g_ab[k + (open_ ? 3 : 0)] * 0.01f; }
+static float g_wfwd, g_wgrip, g_gh_grip = 63.0f, g_tip_off, g_wsw, g_sw_pitch = 15.0f;      /* g_wsw: how far the sword is raised to point forward (sword mode, not mid-attack); g_sw_pitch: degrees it points below level */
+      /* scythe: g_wfwd = how far the blade is turned to lead the swing (0..1); g_wgrip = cm the hand is slid up the haft toward the blade (sword mode); gh_grip.txt "grip_cm tip_turn_deg" */
 static float g_wadj[6]; static int g_wadj_on;      // g_wadj: slide (cm) and turn (deg) of Gehrman's spear in his hand, x y z rx ry rz; g_wadj_on is set only while he is being posed
-static void hunter_skin(void) {
+static void hunter_skin_core(void) {
     float Mc[12]; int blade = H.wset && H.hand >= 0;
     if (blade) {                                            // blade part: hand pose * the weapon's own animation
         const float *S = H.pose + (size_t)H.hand * 12, *W = H.wm;
@@ -1996,7 +2063,7 @@ static void hunter_skin(void) {
             WA[0] = cz * cy; WA[1] = cz * sy_ * sxr - sz_ * cx; WA[2] = cz * sy_ * cx + sz_ * sxr;
             WA[3] = sz_ * cy; WA[4] = sz_ * sy_ * sxr + cz * cx; WA[5] = sz_ * sy_ * cx - cz * sxr;
             WA[6] = -sy_; WA[7] = cy * sxr; WA[8] = cy * cx;
-            WT[0] = g_wadj[0] * 0.01f; WT[1] = g_wadj[1] * 0.01f; WT[2] = g_wadj[2] * 0.01f;
+            WT[0] = g_wadj[0] * 0.01f; WT[1] = g_wadj[1] * 0.01f; WT[2] = g_wadj[2] * 0.01f;      /* (the grip is set after skinning, along the weapon's measured axis: see grip_fix) */
         }
     }
     for (uint32_t v = 0; v < H.nV; v++) {
@@ -2008,6 +2075,7 @@ static void hunter_skin(void) {
             o[0] = Mc[0]*rx_ + Mc[1]*ry_ + Mc[2]*rz_ + Mc[3];
             o[1] = Mc[4]*rx_ + Mc[5]*ry_ + Mc[6]*rz_ + Mc[7];
             o[2] = Mc[8]*rx_ + Mc[9]*ry_ + Mc[10]*rz_ + Mc[11];
+            if (g_wadj_on && H.scale > 0.0f && H.scale != 1.0f) { o[0] *= H.scale; o[1] *= H.scale; o[2] *= H.scale; }      // (the handle is scaled with his body; the blade must be too, or it drifts off the end of the handle once the weapon is turned)
             continue;
         }
         const float *s0 = H.pose + (size_t)H.vb[v * 4] * 12, *s1 = H.pose + (size_t)H.vb[v * 4 + 1] * 12;
@@ -2019,6 +2087,168 @@ static void hunter_skin(void) {
         o[2] = w0 * (s0[8]*x + s0[9]*y + s0[10]*z + s0[11]) + w1 * (s1[8]*x + s1[9]*y + s1[10]*z + s1[11]);
         if (H.scale > 0.0f && H.scale != 1.0f) { o[0] *= H.scale; o[1] *= H.scale; o[2] *= H.scale; }
     }
+    if (H.limp) for (uint32_t v = 0; v < H.nV; v++) if (H.limp[v]) { float *o = &H.skinned[v * 5]; float z_ = o[2] - H.limp[v] * (1.0f / 255.0f) * H.limp_d; if (z_ < 0.05f) z_ = o[2] < 0.05f ? o[2] : 0.05f; o[2] = z_; }      /* limb_break: a broken limb hangs lower (never through the floor) */
+    if (g_wadj_on) { static unsigned dc_ = 0; if ((dc_++ % 300) == 0) { int n1_ = 0, n2_ = 0, n0_ = 0; for (uint32_t v = 0; v < H.nV; v++) { int k_ = H.vb[v * 4 + 3]; if (k_ == 1) n1_++; else if (k_ == 2) n2_++; else n0_++; } char t_[220]; snprintf(t_, sizeof t_, "hunter_skin gehrman: wsw %.2f grip %.0f blade %d hand %d wset %d flags 1:%d 2:%d other:%d wadj %d", g_wsw, g_wgrip, blade, H.hand, H.wset, n1_, n2_, n0_, wadj); maplog("%s%s", t_, ""); } }      /* (log_on.txt: which weapon vertices the game treats as the blade and the haft) */
+    if (g_wadj_on && blade && g_gh_grip > 0.001f && H.hand >= 0) {      /* grip_fix: slide the whole weapon along its own measured axis so the hand holds it g_wgrip cm below the end that carries the blade (the axis comes from the skinned still part, so no file axis is assumed) */
+        uint32_t vt = 0, vbm = 0; float zt = 1e9f, zb = -1e9f; int ns = 0;
+        for (uint32_t v = 0; v < H.nV; v++) if (H.vb[v * 4 + 3] == 2) { float z = H.rest[v * 5 + 2]; ns++; if (z < zt) { zt = z; vt = v; } if (z > zb) { zb = z; vbm = v; } }
+        if (ns > 8) {
+            float a_[3], sc_ = (H.scale > 0.0f && H.scale != 1.0f) ? H.scale : 1.0f; const float *S_ = H.pose + (size_t)H.hand * 12; float P0[3] = { S_[3] * sc_, S_[7] * sc_, S_[11] * sc_ };
+            for (int i = 0; i < 3; i++) a_[i] = H.skinned[vt * 5 + i] - H.skinned[vbm * 5 + i];
+            float al = sqrtf(a_[0]*a_[0] + a_[1]*a_[1] + a_[2]*a_[2]);
+            if (al > 0.2f) {
+                for (int i = 0; i < 3; i++) a_[i] /= al;
+                float smax = -1e9f; for (uint32_t v = 0; v < H.nV; v++) { int k = H.vb[v * 4 + 3]; if (k != 2) continue;      /* (the haft only, so the hand sits at the same place on the weapon whether it is a sword or a scythe, like the hunter's) */ const float *o = &H.skinned[v * 5]; float p_ = o[0]*a_[0] + o[1]*a_[1] + o[2]*a_[2]; if (p_ > smax) smax = p_; }
+                float sh = P0[0]*a_[0] + P0[1]*a_[1] + P0[2]*a_[2], dnow = smax - sh, dwant = g_gh_grip * 0.01f * sc_, dl = dnow - dwant;
+                { static unsigned gc_ = 0; if ((gc_++ % 240) == 0) { char t_[200]; snprintf(t_, sizeof t_, "grip_fix: hand is %.0f cm below the top of the haft, wants %.0f, slide %.0f cm", dnow * 100.0f / sc_, g_gh_grip, dl * 100.0f / sc_); maplog("%s%s", t_, ""); } }
+                for (uint32_t v = 0; v < H.nV; v++) { int k = H.vb[v * 4 + 3]; if (k != 1 && k != 2) continue; float *o = &H.skinned[v * 5]; for (int i = 0; i < 3; i++) o[i] -= a_[i] * dl; }
+            }
+        }
+    }
+    if (g_wadj_on && blade && g_wsw > 0.001f && H.hand >= 0) {      // sword_fwd: in sword mode, between swings, the blade points out in front of him (a little below level) instead of hanging down
+        uint32_t vt = 0, vbm = 0; float zt = 1e9f, zb = -1e9f; int ns = 0;
+        for (uint32_t v = 0; v < H.nV; v++) if (H.vb[v * 4 + 3] == 2) { float z = H.rest[v * 5 + 2]; ns++; if (z < zt) { zt = z; vt = v; } if (z > zb) { zb = z; vbm = v; } }
+        if (ns > 8) {
+            float a_[3], sc_ = (H.scale > 0.0f && H.scale != 1.0f) ? H.scale : 1.0f; const float *S_ = H.pose + (size_t)H.hand * 12; float P0[3] = { S_[3] * sc_, S_[7] * sc_, S_[11] * sc_ };
+            for (int i = 0; i < 3; i++) a_[i] = H.skinned[vt * 5 + i] - H.skinned[vbm * 5 + i];
+            float al = sqrtf(a_[0]*a_[0] + a_[1]*a_[1] + a_[2]*a_[2]);
+            if (al > 0.2f) {
+                float el = g_sw_pitch * 0.0174533f, t_[3] = { cosf(el), 0.0f, -sinf(el) };
+                for (int i = 0; i < 3; i++) a_[i] /= al;
+                float kx = a_[1]*t_[2] - a_[2]*t_[1], ky = a_[2]*t_[0] - a_[0]*t_[2], kz = a_[0]*t_[1] - a_[1]*t_[0], kl = sqrtf(kx*kx + ky*ky + kz*kz), dt_ = a_[0]*t_[0] + a_[1]*t_[1] + a_[2]*t_[2];
+                { static unsigned lc_ = 0; if ((lc_++ % 240) == 0) { char t_[200]; snprintf(t_, sizeof t_, "sword raise: wsw %.2f grip %.0f axis %.2f %.2f %.2f turn %.0f deg", g_wsw, g_wgrip, a_[0], a_[1], a_[2], atan2f(kl, dt_) * 57.2958f); maplog("%s%s", t_, ""); } }      /* (log_on.txt: what the raise is doing) */
+                if (kl > 0.001f) {
+                    float th = atan2f(kl, dt_) * g_wsw, ct = cosf(th), st = sinf(th), k_[3] = { kx / kl, ky / kl, kz / kl };
+                    for (uint32_t v = 0; v < H.nV; v++) {
+                        int k = H.vb[v * 4 + 3]; if (k != 1 && k != 2) continue;
+                        float *o = &H.skinned[v * 5]; float d[3] = { o[0] - P0[0], o[1] - P0[1], o[2] - P0[2] };
+                        float kd = k_[0]*d[0] + k_[1]*d[1] + k_[2]*d[2];
+                        float cr[3] = { k_[1]*d[2] - k_[2]*d[1], k_[2]*d[0] - k_[0]*d[2], k_[0]*d[1] - k_[1]*d[0] };
+                        for (int i = 0; i < 3; i++) o[i] = P0[i] + d[i] * ct + cr[i] * st + k_[i] * kd * (1.0f - ct);
+                    }
+                }
+            }
+        }
+    }
+    if (g_wadj_on && blade && fabsf(g_wfwd) > 0.001f) {      // scythe_tip: turn the weapon about its haft so the blade reaches out in front of him (+X in the model's space) while he swings
+        double cs[3] = { 0, 0, 0 }, cm[3] = { 0, 0, 0 }; int ns = 0, nm = 0; uint32_t vt = 0, vbm = 0; float zt = 1e9f, zb = -1e9f;
+        for (uint32_t v = 0; v < H.nV; v++) {
+            int k = H.vb[v * 4 + 3]; const float *o = &H.skinned[v * 5];
+            if (k == 2) { cs[0] += o[0]; cs[1] += o[1]; cs[2] += o[2]; ns++; float z = H.rest[v * 5 + 2]; if (z < zt) { zt = z; vt = v; } if (z > zb) { zb = z; vbm = v; } }
+            else if (k == 1) { cm[0] += o[0]; cm[1] += o[1]; cm[2] += o[2]; nm++; }
+        }
+        if (ns > 8 && nm > 8) {
+            float P0[3] = { (float)(cs[0] / ns), (float)(cs[1] / ns), (float)(cs[2] / ns) }, a_[3], r_[3], f_[3];
+            for (int i = 0; i < 3; i++) a_[i] = H.skinned[vt * 5 + i] - H.skinned[vbm * 5 + i];
+            float al = sqrtf(a_[0]*a_[0] + a_[1]*a_[1] + a_[2]*a_[2]);
+            if (al > 0.2f) {
+                for (int i = 0; i < 3; i++) { a_[i] /= al; r_[i] = (float)(cm[i] / nm) - P0[i]; }
+                float ra = r_[0]*a_[0] + r_[1]*a_[1] + r_[2]*a_[2]; for (int i = 0; i < 3; i++) r_[i] -= a_[i] * ra;
+                f_[0] = 1.0f - a_[0] * a_[0]; f_[1] = -a_[0] * a_[1]; f_[2] = -a_[0] * a_[2];
+                float rl = sqrtf(r_[0]*r_[0] + r_[1]*r_[1] + r_[2]*r_[2]), fl = sqrtf(f_[0]*f_[0] + f_[1]*f_[1] + f_[2]*f_[2]);
+                if (rl > 0.08f && fl > 0.25f) {
+                    for (int i = 0; i < 3; i++) { r_[i] /= rl; f_[i] /= fl; }
+                    float cx_ = r_[1]*f_[2] - r_[2]*f_[1], cy_ = r_[2]*f_[0] - r_[0]*f_[2], cz_ = r_[0]*f_[1] - r_[1]*f_[0];
+                    float th = atan2f(a_[0]*cx_ + a_[1]*cy_ + a_[2]*cz_, r_[0]*f_[0] + r_[1]*f_[1] + r_[2]*f_[2]);
+                    th = (th + g_tip_off * 0.0174533f) * g_wfwd; float ct = cosf(th), st = sinf(th);
+                    for (uint32_t v = 0; v < H.nV; v++) {
+                        int k = H.vb[v * 4 + 3]; if (k != 1 && k != 2) continue;
+                        float *o = &H.skinned[v * 5]; float d[3] = { o[0] - P0[0], o[1] - P0[1], o[2] - P0[2] };
+                        float ad = a_[0]*d[0] + a_[1]*d[1] + a_[2]*d[2];
+                        float cr[3] = { a_[1]*d[2] - a_[2]*d[1], a_[2]*d[0] - a_[0]*d[2], a_[0]*d[1] - a_[1]*d[0] };
+                        for (int i = 0; i < 3; i++) o[i] = P0[i] + d[i] * ct + cr[i] * st + a_[i] * ad * (1.0f - ct);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* two-handed Moonlight Sword: the left hand follows the sword's hilt, the left arm bends at the elbow to reach it (two-bone IK on hunter.bin's left arm: bones 3 upper arm, 4 forearm, 5 hand; the right arm is left to the animation) */
+static int g_ik2h = 0; static float g_ik2h_w = 0.0f;
+typedef struct { float r[9], t[3]; } Xf_;
+static void xf_from_(const float *m, Xf_ *o) { o->r[0] = m[0]; o->r[1] = m[1]; o->r[2] = m[2]; o->t[0] = m[3]; o->r[3] = m[4]; o->r[4] = m[5]; o->r[5] = m[6]; o->t[1] = m[7]; o->r[6] = m[8]; o->r[7] = m[9]; o->r[8] = m[10]; o->t[2] = m[11]; }
+static void xf_to_(const Xf_ *x, float *m) { m[0] = x->r[0]; m[1] = x->r[1]; m[2] = x->r[2]; m[3] = x->t[0]; m[4] = x->r[3]; m[5] = x->r[4]; m[6] = x->r[5]; m[7] = x->t[1]; m[8] = x->r[6]; m[9] = x->r[7]; m[10] = x->r[8]; m[11] = x->t[2]; }
+static void xf_pt_(const Xf_ *x, const float *p, float *o) { for (int i = 0; i < 3; i++) o[i] = x->r[i*3]*p[0] + x->r[i*3+1]*p[1] + x->r[i*3+2]*p[2] + x->t[i]; }
+static void xf_mul_(const Xf_ *a, const Xf_ *b, Xf_ *o) { Xf_ t; for (int i = 0; i < 3; i++) { for (int j = 0; j < 3; j++) t.r[i*3+j] = a->r[i*3]*b->r[j] + a->r[i*3+1]*b->r[3+j] + a->r[i*3+2]*b->r[6+j]; t.t[i] = a->r[i*3]*b->t[0] + a->r[i*3+1]*b->t[1] + a->r[i*3+2]*b->t[2] + a->t[i]; } *o = t; }
+static void v3n_(float *v) { float l = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]); if (l > 1e-8f) { v[0] /= l; v[1] /= l; v[2] /= l; } }
+static void rot_to_(const float *a0, const float *b0, float *R) {      /* the rotation that turns direction a0 onto b0 */
+    float a[3] = { a0[0], a0[1], a0[2] }, b[3] = { b0[0], b0[1], b0[2] }; v3n_(a); v3n_(b);
+    float v[3] = { a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0] }, c = a[0]*b[0] + a[1]*b[1] + a[2]*b[2], s = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+    for (int i = 0; i < 9; i++) R[i] = (i % 4 == 0) ? 1.0f : 0.0f;
+    if (s < 1e-6f) { if (c < 0.0f) { R[0] = R[4] = R[8] = -1.0f; } return; }
+    float k[3] = { v[0] / s, v[1] / s, v[2] / s }, K[9] = { 0, -k[2], k[1], k[2], 0, -k[0], -k[1], k[0], 0 }, K2[9];
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) K2[i*3+j] = K[i*3]*K[j] + K[i*3+1]*K[3+j] + K[i*3+2]*K[6+j];
+    for (int i = 0; i < 9; i++) R[i] += K[i] * s + K2[i] * (1.0f - c);
+}
+static void xf_about_(const float *R, const float *p, Xf_ *o) { for (int i = 0; i < 9; i++) o->r[i] = R[i]; for (int i = 0; i < 3; i++) o->t[i] = p[i] - (R[i*3]*p[0] + R[i*3+1]*p[1] + R[i*3+2]*p[2]); }
+static void hunter_ik_left_(void) {
+    const float Sb[3] = { -0.0675f, -0.1479f, 1.4206f }, Eb[3] = { -0.083f, -0.3146f, 1.1815f }, PLb[3] = { -0.005f, -0.463f, 0.955f }, PRb[3] = { 0.0f, 0.46f, 0.975f };      /* left shoulder, left elbow, left palm, right palm in the bind pose (hunter.bin) */
+    Xf_ M3, M4, M5, MR; xf_from_(H.pose + 3 * 12, &M3); xf_from_(H.pose + 4 * 12, &M4); xf_from_(H.pose + 5 * 12, &M5); xf_from_(H.pose + 9 * 12, &MR);
+    float S[3], E[3], Pp[3], Pr[3], ax[3], tg[3];
+    xf_pt_(&M3, Sb, S); xf_pt_(&M4, Eb, E); xf_pt_(&M5, PLb, Pp); xf_pt_(&MR, PRb, Pr);
+    { const float a0_[3] = { 0.9843f, -0.0095f, 0.1765f }; for (int i = 0; i < 3; i++) ax[i] = a0_[0] * MR.r[i*3] + a0_[1] * MR.r[i*3+1] + a0_[2] * MR.r[i*3+2]; } v3n_(ax);      /* (this used to overwrite ax[0] and ax[1] while it was still reading them, so the axis it used came out about 120 degrees from the real one in the standing pose: the left hand was turned to lie along an axis that is not the sword's. The axis is now worked out from the sword's own bind direction in weapons.bin, (0.9843, -0.0095, 0.1765)) */      /* the sword's axis, pommel to tip */
+    static float ik_[3] = { 115.0f, 0.04f, 0.11f }; static int ik_ld_; if (!ik_ld_) { ik_ld_ = 1; FILE *f_ = fopen("ux0:data/bbpsx/moon_ik.txt", "r"); if (f_) { float a_, b_, c_; if (fscanf(f_, "%f %f %f", &a_, &b_, &c_) == 3) { ik_[0] = a_; ik_[1] = b_; ik_[2] = c_; } fclose(f_); } }      /* (moon_ik.txt: the most the left shoulder may swing in degrees, then how far below the right palm the left palm may sit, nearest and furthest, in metres) */
+    { float sd_ = (Pr[0] - Pp[0]) * ax[0] + (Pr[1] - Pp[1]) * ax[1] + (Pr[2] - Pp[2]) * ax[2]; if (sd_ < ik_[1]) sd_ = ik_[1]; if (sd_ > ik_[2]) sd_ = ik_[2]; for (int i = 0; i < 3; i++) tg[i] = Pr[i] - sd_ * ax[i]; }      /* the left palm goes to the point of the hilt nearest to where the animation put it (10 to 27 cm below the right one), so the arm is bent as little as possible from the animation's own pose */
+    float L1 = sqrtf((E[0]-S[0])*(E[0]-S[0]) + (E[1]-S[1])*(E[1]-S[1]) + (E[2]-S[2])*(E[2]-S[2])), L2 = sqrtf((Pp[0]-E[0])*(Pp[0]-E[0]) + (Pp[1]-E[1])*(Pp[1]-E[1]) + (Pp[2]-E[2])*(Pp[2]-E[2]));
+    { float d0_[3] = { tg[0] - S[0], tg[1] - S[1], tg[2] - S[2] }; if (d0_[0]*d0_[0] + d0_[1]*d0_[1] + d0_[2]*d0_[2] < 0.0025f) return; }
+    float tg0_[3] = { tg[0], tg[1], tg[2] }, E2[3];
+    {   /* the upper arm may swing at most about 90 degrees from where the animation had it. The attack animations were made for a longer weapon with the hands up to a metre and a half apart, so with the hand on the short hilt the shoulder was swung up to 160 degrees, and the shoulder popped into the torso. Where the hilt is further than that, the hand stops short of it (slides back toward where the animation had the palm) instead */
+        float lo_ = 0.0f, hi_ = 1.0f, cosmax_ = cosf(ik_[0] * 0.0174533f);
+        for (int it_ = 0; it_ < 26; it_++) {
+            float k_ = (it_ == 0) ? 1.0f : (it_ == 25 ? lo_ : 0.5f * (lo_ + hi_));
+            for (int i = 0; i < 3; i++) tg[i] = Pp[i] + k_ * (tg0_[i] - Pp[i]);
+            float d[3] = { tg[0] - S[0], tg[1] - S[1], tg[2] - S[2] }, D = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]); if (D < 0.02f) D = 0.02f;
+            float dn[3] = { d[0] / D, d[1] / D, d[2] / D }; if (D > L1 + L2 - 0.002f) D = L1 + L2 - 0.002f; if (D < fabsf(L1 - L2) + 0.002f) D = fabsf(L1 - L2) + 0.002f;
+            float a = (L1*L1 - L2*L2 + D*D) / (2.0f * D), hh = L1*L1 - a*a; hh = hh > 0.0f ? sqrtf(hh) : 0.0f;
+            float pole[3] = { E[0] - S[0], E[1] - S[1], E[2] - S[2] }, pd = pole[0]*dn[0] + pole[1]*dn[1] + pole[2]*dn[2]; for (int i = 0; i < 3; i++) pole[i] -= pd * dn[i];
+            if (pole[0]*pole[0] + pole[1]*pole[1] + pole[2]*pole[2] < 0.0004f) { pole[0] = 0.0f; pole[1] = -0.6f; pole[2] = -1.0f; pd = pole[0]*dn[0] + pole[1]*dn[1] + pole[2]*dn[2]; for (int i = 0; i < 3; i++) pole[i] -= pd * dn[i]; }
+            v3n_(pole);      /* the elbow stays on the side the animation bent it to (down and out only if the animation's arm is straight) */
+            for (int i = 0; i < 3; i++) E2[i] = S[i] + dn[i] * a + pole[i] * hh;
+            float u1_[3] = { E[0]-S[0], E[1]-S[1], E[2]-S[2] }, u2_[3] = { E2[0]-S[0], E2[1]-S[1], E2[2]-S[2] }; v3n_(u1_); v3n_(u2_);
+            float cs_ = u1_[0]*u2_[0] + u1_[1]*u2_[1] + u1_[2]*u2_[2];
+            if (it_ == 0) { if (cs_ >= cosmax_) break; }
+            else if (it_ < 25) { if (cs_ < cosmax_) hi_ = k_; else lo_ = k_; }
+        }
+    }
+    float R1[9], R2[9], v1[3] = { E[0]-S[0], E[1]-S[1], E[2]-S[2] }, v2[3] = { E2[0]-S[0], E2[1]-S[1], E2[2]-S[2] }; Xf_ T1, T2, N3, N4, N5, tmp;
+    rot_to_(v1, v2, R1);
+    {   /* the elbow keeps bending in the plane the animation bent it in: the arm is rolled about its own axis (shoulder to elbow) so the elbow's hinge lines up with the new bend. Without this the forearm came out rolled by up to 70 degrees against the upper arm, which was the twisted look. (tested on the Gascoigne two-hand animations: the elbow roll goes to zero) */
+        float vp_[3] = { Pp[0]-E[0], Pp[1]-E[1], Pp[2]-E[2] }, h0_[3] = { v1[1]*vp_[2] - v1[2]*vp_[1], v1[2]*vp_[0] - v1[0]*vp_[2], v1[0]*vp_[1] - v1[1]*vp_[0] };
+        float u_[3] = { v2[0], v2[1], v2[2] }, w2_[3] = { tg[0]-E2[0], tg[1]-E2[1], tg[2]-E2[2] };
+        float n_[3] = { u_[1]*w2_[2] - u_[2]*w2_[1], u_[2]*w2_[0] - u_[0]*w2_[2], u_[0]*w2_[1] - u_[1]*w2_[0] };
+        if (h0_[0]*h0_[0] + h0_[1]*h0_[1] + h0_[2]*h0_[2] > 1e-8f && n_[0]*n_[0] + n_[1]*n_[1] + n_[2]*n_[2] > 1e-8f) {
+            v3n_(h0_); v3n_(n_); v3n_(u_);
+            float h1_[3]; for (int i = 0; i < 3; i++) h1_[i] = R1[i*3]*h0_[0] + R1[i*3+1]*h0_[1] + R1[i*3+2]*h0_[2];
+            float d1_ = h1_[0]*u_[0] + h1_[1]*u_[1] + h1_[2]*u_[2], d2_ = n_[0]*u_[0] + n_[1]*u_[1] + n_[2]*u_[2];
+            for (int i = 0; i < 3; i++) { h1_[i] -= d1_ * u_[i]; n_[i] -= d2_ * u_[i]; }
+            if (h1_[0]*h1_[0] + h1_[1]*h1_[1] + h1_[2]*h1_[2] > 1e-10f && n_[0]*n_[0] + n_[1]*n_[1] + n_[2]*n_[2] > 1e-10f) {
+                v3n_(h1_); v3n_(n_);
+                float cr_[3] = { h1_[1]*n_[2] - h1_[2]*n_[1], h1_[2]*n_[0] - h1_[0]*n_[2], h1_[0]*n_[1] - h1_[1]*n_[0] };
+                float th_ = atan2f(u_[0]*cr_[0] + u_[1]*cr_[1] + u_[2]*cr_[2], h1_[0]*n_[0] + h1_[1]*n_[1] + h1_[2]*n_[2]), sn_ = sinf(th_), cs_ = cosf(th_);
+                float K_[9] = { 0, -u_[2], u_[1], u_[2], 0, -u_[0], -u_[1], u_[0], 0 }, K2_[9], Rr_[9], Rn_[9];
+                for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) K2_[i*3+j] = K_[i*3]*K_[j] + K_[i*3+1]*K_[3+j] + K_[i*3+2]*K_[6+j];
+                for (int i = 0; i < 9; i++) Rr_[i] = ((i % 4 == 0) ? 1.0f : 0.0f) + K_[i] * sn_ + K2_[i] * (1.0f - cs_);
+                for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) Rn_[i*3+j] = Rr_[i*3]*R1[j] + Rr_[i*3+1]*R1[3+j] + Rr_[i*3+2]*R1[6+j];
+                for (int i = 0; i < 9; i++) R1[i] = Rn_[i];
+            }
+        }
+    }
+    xf_about_(R1, S, &T1);
+    float P1[3]; xf_pt_(&T1, Pp, P1);
+    float u1[3] = { P1[0]-E2[0], P1[1]-E2[1], P1[2]-E2[2] }, u2[3] = { tg[0]-E2[0], tg[1]-E2[1], tg[2]-E2[2] }; rot_to_(u1, u2, R2); xf_about_(R2, E2, &T2);
+    xf_mul_(&T1, &M3, &N3); xf_mul_(&T1, &M4, &tmp); xf_mul_(&T2, &tmp, &N4); xf_mul_(&T1, &M5, &tmp); xf_mul_(&T2, &tmp, &N5);
+    {   /* the hand turns to lie along the hilt */
+        float hx[3] = { N5.r[0], N5.r[3], N5.r[6] }, tx[3] = { ax[0], ax[1], ax[2] }; if (hx[0]*tx[0] + hx[1]*tx[1] + hx[2]*tx[2] < 0.0f) { tx[0] = -tx[0]; tx[1] = -tx[1]; tx[2] = -tx[2]; }
+        float Rl[9]; Xf_ H5; rot_to_(hx, tx, Rl); xf_about_(Rl, tg, &H5); xf_mul_(&H5, &N5, &N5);
+    }
+    xf_to_(&N3, H.pose + 3 * 12); xf_to_(&N4, H.pose + 4 * 12); xf_to_(&N5, H.pose + 5 * 12);
+}
+static void hunter_skin(void) {
+    float sv_[36]; int ik_ = g_ik2h && CUR == &HUNT && H.nB == 21 && H.wbone == 9;
+    if (ik_) { memcpy(sv_, H.pose + 3 * 12, 36 * sizeof(float)); hunter_ik_left_(); if (g_ik2h_w < 0.999f) for (int i_ = 0; i_ < 36; i_++) H.pose[3 * 12 + i_] = sv_[i_] + (H.pose[3 * 12 + i_] - sv_[i_]) * g_ik2h_w; }
+    hunter_skin_core();
+    if (ik_) memcpy(H.pose + 3 * 12, sv_, 36 * sizeof(float));
 }
 
 // ---- 2D HUD: original UI art from ui.bin (packed by tools/convert_ui.py), laid out like W_MainPlayerUI (1920x1080 units) ----
@@ -2113,15 +2343,23 @@ static const char *wm_nice(const char *m) {      /* lamp_names: what the lantern
     if (!strcasecmp(m, "clericbeastarena")) return "Great Bridge";
     if (!strcasecmp(m, "gilbert")) return "Central Yharnam";
     if (strstr(m, "firstfloorsickroom")) return "1st Floor Sickroom";
+    if (!strcasecmp(m, "ic_sickroom2")) return "The Other Sickroom";
     if (strstr(m, "deepsewers")) return "Deep Sewers";
     if (!strcasecmp(m, "greatbonfire")) return "Great Bonfire";
     if (!strcasecmp(m, "ge_bossarena")) return "Gilbert Estate";
+    if (!strcasecmp(m, "romarena")) return "Forbidden Woods Crater"; if (!strcasecmp(m, "moonarena")) return "Moonlit Water"; if (!strcasecmp(m, "romlake")) return "Moonside Lake";
+    if (!strcasecmp(m, "oedonchapel")) return "Oedon Chapel";      /* cathedral_ward: the first room of the Cathedral Ward */
     return NULL;
 }
 static const float DREAM_STONES[2][2] = { { -26.81f, -21.41f }, { -0.33f, -7.29f } };
 // boss_rush: the mode messenger (the last note messenger of the Dream: talk to him; ux0:data/bbpsx/modes_messenger.txt = "x y z yaw" puts him somewhere else) opens a small menu of game modes. Boss rush: the Dream's other tombstone takes you to the next boss arena
 static int g_wm_mode = 0; static const char *g_md_txt[2]; static int g_rush = 0, g_rush_i = 0, g_rush_heal = 0, g_md_slot = -1; static float g_rush_ask = 0.0f, g_rush_clr = -1.0f, g_rush_time = 0.0f;
-static const char *const RUSH_MAPS[3] = { "clericbeastarena", "gascoignearena", "ge_bossarena" };      // BP_GravestoneLevelLoader3 / _2 in MP_HuntersDream
+static int g_gb_dead;      // (defined with the Gilbert code)
+static int g_rs[8];      // boss_rush: the story flags as they were when the run began (gas, cb, gb, gh dead; their redo flags): the run puts them back at the end, and the night does not deepen while it lasts
+static void rush_snap(void) { g_rs[0] = g_gas_dead; g_rs[1] = g_cb_dead; g_rs[2] = g_gb_dead; g_rs[3] = g_gh_dead; g_rs[4] = g_gas_redo; g_rs[5] = g_cb_redo; g_rs[6] = g_gb_redo; g_rs[7] = g_gh_redo; }
+static void rush_unsnap(void) { g_gas_dead = g_rs[0]; g_cb_dead = g_rs[1]; g_gb_dead = g_rs[2]; g_gh_dead = g_rs[3]; g_gas_redo = g_rs[4]; g_cb_redo = g_rs[5]; g_gb_redo = g_rs[6]; g_gh_redo = g_rs[7]; }
+static int gas_night(void) { return g_rush ? g_rs[0] : g_gas_dead; }      // is the night deep (Gascoigne fell for real)?
+static const char *const RUSH_MAPS[5] = { "clericbeastarena", "gascoignearena", "ge_bossarena", "romlake", "romarena" };      // (the fourth fight: Rom in her lake, the fifth the Amygdala at Byrgenwerth; the sixth is Gehrman, in the Dream itself: no map to load)      // BP_GravestoneLevelLoader3 / _2 in MP_HuntersDream
 static int g_prompt_x = 0;      /* 1 = a pickup / echo drop is in reach (press X) */
 static int g_prompt = 0;        /* 1 = something to interact with is in reach (door / ladder) */
 static void hud_rect(float x, float y, float w, float h, float r, float g, float b, float a) {
@@ -8386,12 +8624,12 @@ static void boss_hud(float dt) {
 }
 
 // ---- item_icons: the game's item art (itemicons.bin, packed by make_itemicons.sh) for the inventory ----
-static UiTex ic_t[96]; static int ic_n;
+static UiTex ic_t[400]; static int ic_n;      /* (was 160: a bigger icon pack lost its last pictures, the category tabs among them) */
 static int load_icons(const char *path) {
     FILE *f = fopen(path, "rb"); if (!f) return 0;
     char magic[4]; uint32_t n;
     if (fread(magic, 1, 4, f) != 4 || memcmp(magic, "BBUI", 4) || fread(&n, 4, 1, f) != 1) { fclose(f); return 0; }
-    for (uint32_t i = 0; i < n && ic_n < 96; i++) {
+    for (uint32_t i = 0; i < n && ic_n < 400; i++) {
         uint8_t nl; uint16_t wh[2];
         if (fread(&nl, 1, 1, f) != 1 || nl > 31) break;
         UiTex *t = &ic_t[ic_n];
@@ -8407,6 +8645,7 @@ static int load_icons(const char *path) {
         free(px); ic_n++;
     }
     fclose(f);
+    { int cat_ = 0; for (int q_ = 0; q_ < ic_n; q_++) if (!strcasecmp(ic_t[q_].name, "T_IconCateg_Attire")) cat_ = 1; char t_[120]; snprintf(t_, sizeof t_, "icons: %s: %d in memory, category icons %s", path, ic_n, cat_ ? "found" : "MISSING"); maplog("%s%s", t_, ""); }
     return ic_n > 0;
 }
 static const UiTex *ic_get(const char *name) { for (int i = 0; i < ic_n; i++) if (!strcasecmp(ic_t[i].name, name)) return &ic_t[i]; return NULL; }
@@ -8456,13 +8695,14 @@ static const UiTex *ic_by_text(const char *key, const char *label) {      // the
         if (best) return best; }
     return NULL;
 }
-static const char *ICON_WPN[12] = { "T_IconCleaver", "T_IconHunterAxe", "T_IconBloodSpear", NULL, "T_IconBladesOfMercy", "T_IconPistol", "T_IconBlunder", "T_IconDBShotgun", "T_IconFlamesprayer", "T_IconTorch", "T_IconThreadedCane", "T_IconTonitrus" };
+static const char *ICON_WPN[NWPN] = { "T_IconCleaver", "T_IconHunterAxe", "T_IconBloodSpear", NULL, "T_IconBladesOfMercy", "T_IconPistol", "T_IconBlunder", "T_IconDBShotgun", "T_IconFlamesprayer", "T_IconTorch", "T_IconThreadedCane", "T_IconTonitrus", NULL, NULL, "T_IconBurialBlade", "T_IconMoonlight", NULL };
 static const char *ICON_HAT[10] = { "T_IconHatHunter", "T_IconHatBlackHood", "T_IconHatCrowfeather", "T_IconHatDoll", "T_IconHatGas", NULL, "T_IconHatMerchant", "T_IconHatSteepled", "T_IconHatRumpled", "T_IconHatTop" };
 static const char *ICON_BODY[8] = { "T_IconAttireHunter", "T_IconAttireCrowfeather", "T_IconAttireDoll", "T_IconAttireForeign", "T_IconAttireGas", "T_IconAttireHenryk", NULL, "T_IconAttireYharnamClothes" };
 static const UiTex *ic_row(const InvRow *r) {      // the icon of an inventory row (kind 0 item / 4 weapon / 5 attire), NULL if it has none
+    if (r->kind == 0 && (trans_name(r->key) || trans_name(r->label))) { static const char *TN_[6] = { "T_IconBulletsTrans", "T_IconBulletTrans", "T_IconBulletTransfuser", "T_IconTransfuser", "T_IconBloodBullets", "T_IconBloodBullet" }; for (int q_ = 0; q_ < 6; q_++) { const UiTex *t_ = ic_get(TN_[q_]); if (t_) return t_; } }      /* bt_shown: its own icon, under whichever of these names the pack has */
     if (r->kind == 0) return ic_by_text(r->key, r->label);
-    if (r->kind == 4) { int w = atoi(r->key); return (w >= 0 && w < 12 && ICON_WPN[w]) ? ic_get(ICON_WPN[w]) : NULL; }
-    if (r->kind == 5) { int k = atoi(r->key); if (g_mn_assign == 20) return (k >= 0 && k < 10 && ICON_HAT[k]) ? ic_get(ICON_HAT[k]) : NULL; return (k >= 0 && k < 8 && ICON_BODY[k]) ? ic_get(ICON_BODY[k]) : NULL; }
+    if (r->kind == 4) { int w = atoi(r->key); return (w >= 0 && w < NWPN && ICON_WPN[w]) ? ic_get(ICON_WPN[w]) : NULL; }
+    if (r->kind == 5) { int k = atoi(r->key); if (g_mn_assign == 20 || r->cat == 20) return (k >= 0 && k < 10 && ICON_HAT[k]) ? ic_get(ICON_HAT[k]) : NULL; return (k >= 0 && k < 8 && ICON_BODY[k]) ? ic_get(ICON_BODY[k]) : NULL; }
     return NULL;
 }
 static void ic_shop(int id, float x, float y, float sz) {      // shop_icons: a shop entry's art (0 vial, 1 bullet, 100+w weapon, 200+k hat, 300+k garb)
@@ -8472,7 +8712,7 @@ static void ic_shop(int id, float x, float y, float sz) {      // shop_icons: a 
     if (id >= 2 && id <= 9) { const char *nm_ = id == 9 ? "HuntersMarkBold" : id == 2 ? "Antidote" : (id == 3 ? "Sedative" : (id == 4 ? "Pebble" : (id == 5 ? "Molotov" : (id == 6 ? "FirePaper" : (id == 8 ? "ThrowingKnife" : "LightningPaper"))))); const UiTex *m_ = ic_by_text(nm_, nm_); if (m_) ic_quad(m_, x, y, sz, sz); return; }
     if (id >= 300) { int k = id - 300; if (k < 8 && ICON_BODY[k]) t = ic_get(ICON_BODY[k]); }
     else if (id >= 200) { int k = id - 200; if (k < 10 && ICON_HAT[k]) t = ic_get(ICON_HAT[k]); }
-    else if (id >= 100) { int w = id - 100; if (w < 12 && ICON_WPN[w]) t = ic_get(ICON_WPN[w]); }
+    else if (id >= 100) { int w = id - 100; if (w < NWPN && ICON_WPN[w]) t = ic_get(ICON_WPN[w]); }
     if (t) ic_quad(t, x, y, sz, sz);
 }
 static void inv_gem(int cat, float sx, float sy, float Z) {      // a picked-up item with no art of its own: the coloured gem for its category
@@ -8480,6 +8720,10 @@ static void inv_gem(int cat, float sx, float sy, float Z) {      // a picked-up 
     float v[8] = { X, Y, X + Zk, Y, X, Y + Zk, X + Zk, Y + Zk }, uv[8] = { 0, 0, 1, 0, 0, 1, 1, 1 };
     glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, gemCat[cat & 7]); glColor4f(1, 1, 1, 1);
     glVertexPointer(2, GL_FLOAT, 0, v); glTexCoordPointer(2, GL_FLOAT, 0, uv); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+static void slot_hint(const char *name, float sx, float sy, float S) {      /* slot_hints: the category picture, dimmed, in an empty slot */
+    const UiTex *t_ = ic_get(name); if (!t_) return;
+    glEnable(GL_TEXTURE_2D); ic_quad(t_, sx + 14, sy + 14, S - 28, S - 28); glDisable(GL_TEXTURE_2D); hud_rect((sx + 14) * hud_k, (sy + 14) * hud_k, (S - 28) * hud_k, (S - 28) * hud_k, 0.04f, 0.03f, 0.03f, 0.62f); glEnable(GL_TEXTURE_2D);
 }
 static void inv_slot_icon(const InvRow *r, float sx, float sy, float S) {
     glEnable(GL_TEXTURE_2D);
@@ -8559,7 +8803,7 @@ static float mn_fa(const char *str, float x, float y, float capH, float r, float
 }
 static int store_rows(int *kd, int *ix) {      // storage: every weapon / hat / garb you own, carried or kept; then your items
     int n = 0;
-    for (int w = 0; w < 12; w++) if (w != 3 && (g_wown[w] || g_wstore[w])) { kd[n] = 0; ix[n++] = w; }
+    for (int w = 0; w < NWPN; w++) if (w != 3 && (g_wown[w] || g_wstore[w])) { kd[n] = 0; ix[n++] = w; }
     for (int k = 1; k < 10; k++) if (g_att_own[0][k] || g_astore[0][k]) { kd[n] = 1; ix[n++] = k; }
     for (int k = 0; k < 8; k++) if (k != 6 && (g_att_own[1][k] || g_astore[1][k])) { kd[n] = 2; ix[n++] = k; }
     for (int i = 0; i < MAX_INV && n < 120; i++) if (g_inv[i].n > 0 && g_inv[i].key[0]) { kd[n] = 3; ix[n++] = i; }      // item_store: what is in your bag (X stores it)
@@ -8598,11 +8842,13 @@ static void inv_draw_equip(int vials, int bullets) {
         if (r == 0) { const UiTex *tt_ = ic_get(c == 0 ? "M_TabItems" : (c == 1 ? "M_TabStatus" : "M_TabSystem"));
             if (tt_) { ic_quad(tt_, sx + S * 0.09f, sy + S * 0.09f, S * 0.82f, S * 0.82f); if (!sel) { glDisable(GL_TEXTURE_2D); hud_rect((sx + S * 0.09f) * hud_k, (sy + S * 0.09f) * hud_k, S * 0.82f * hud_k, S * 0.82f * hud_k, 0.0f, 0.0f, 0.0f, 0.38f); } }
             else fa_run(MN_TOP[c], sx + 8.0f, sy + S * 0.5f - 7.0f, 13.0f, 0.92f, 0.85f, 0.66f, 1.0f, 1); }
-        else if (r == 1) { if (g_eq[c] >= 0 && g_eq[c] < 12 && ICON_WPN[g_eq[c]] && ic_get(ICON_WPN[g_eq[c]])) ic_quad(ic_get(ICON_WPN[g_eq[c]]), sx + 10, sy + 10, S - 20, S - 20); else if (g_eq[c] >= 0) { const char *ab = WPN[g_eq[c]].abbr; float cap = strlen(ab) > 4 ? 13.0f : 17.0f; fa_run(ab, sx + 8.0f, sy + S * 0.5f - cap * 0.5f, cap, 0.95f, 0.9f, 0.75f, 1.0f, 1); }
+        else if (r == 1) { if (g_eq[c] >= 0 && g_eq[c] < NWPN && ICON_WPN[g_eq[c]] && ic_get(ICON_WPN[g_eq[c]])) ic_quad(ic_get(ICON_WPN[g_eq[c]]), sx + 10, sy + 10, S - 20, S - 20); else if (g_eq[c] >= 0) { const char *ab = WPN[g_eq[c]].abbr; float cap = strlen(ab) > 4 ? 13.0f : 17.0f; fa_run(ab, sx + 8.0f, sy + S * 0.5f - cap * 0.5f, cap, 0.95f, 0.9f, 0.75f, 1.0f, 1); }
+               else if (g_eq[c] < 0) slot_hint(c < 2 ? "T_IconCateg_RWeap" : "T_IconCateg_LWeap", sx, sy, S);      /* slot_hints: an empty slot shows, dimmed, what kind of thing goes in it */
                if (c == g_eq_r || c == g_eq_l) { glDisable(GL_TEXTURE_2D); hud_rect((sx + 6) * hud_k, (sy + S - 7) * hud_k, (S - 12) * hud_k, 3.0f * hud_k, 0.95f, 0.8f, 0.4f, 1); } }
         else if (r == 2 && (c == 0 ? ICON_HAT[g_att[0]] : ICON_BODY[g_att[1]]) && ic_get(c == 0 ? ICON_HAT[g_att[0]] : ICON_BODY[g_att[1]])) ic_quad(ic_get(c == 0 ? ICON_HAT[g_att[0]] : ICON_BODY[g_att[1]]), sx + 10, sy + 10, S - 20, S - 20);
+        else if (r == 2 && ic_get("T_IconCateg_Attire")) slot_hint("T_IconCateg_Attire", sx, sy, S);      /* (a piece of attire with no picture of its own) */
         else if (r == 2) { const char *ab = c == 0 ? ATT_HAT_A[g_att[0]] : ATT_BODY_A[g_att[1]]; fa_run(ab, sx + (strlen(ab) > 3 ? 8.0f : 12.0f), sy + S * 0.5f - 8.0f, strlen(ab) > 3 ? 14.0f : 16.0f, 0.95f, 0.9f, 0.75f, 1.0f, 1); }
-        else { InvRow qr; if (quick_row(g_quick[c], vials, bullets, &qr)) { inv_slot_icon(&qr, sx, sy, S); hud_number(qr.n, sx + S - 7, sy + S - 28, 2.6f, 1, 1, 1); }
+        else { InvRow qr; if (quick_row(g_quick[c], vials, bullets, &qr)) { inv_slot_icon(&qr, sx, sy, S); hud_number(qr.n, sx + S - 7, sy + S - 28, 2.6f, 1, 1, 1); } else slot_hint("T_IconCateg_Cons", sx, sy, S);
                if (c == g_quick_sel) { glDisable(GL_TEXTURE_2D); hud_rect((sx + 6) * hud_k, (sy + S - 7) * hud_k, (S - 12) * hud_k, 3.0f * hud_k, 0.95f, 0.8f, 0.4f, 1); } }
     }
     // the highlighted slot, described on the right
@@ -8633,15 +8879,16 @@ static void inv_draw_items(int vials, int bullets) {
     mn_frame(px, py, gw, W, Hh, g_mn_assign >= 20 ? "CHOOSE ATTIRE" : g_mn_assign >= 10 ? "CHOOSE A WEAPON" : g_mn_assign >= 0 ? "CHOOSE AN ITEM" : "ITEMS");
     float ty = py + 64.0f;
     if (g_mn_assign < 0) {
+        const float TS = 66.0f, TG = 8.0f;      /* inv_categories: six smaller tabs, each with its category picture */
         for (int t = 0; t < INV_TABS; t++) {
-            float sx = px + t * (S + G); int on = t == g_inv_tab;
-            mn_slot(sx, ty, S, on); glEnable(GL_TEXTURE_2D);
-            if (t == 0) ui_quad("T_IconBloodVial", sx + 11, ty + 11, S - 22, S - 22, 1.0f, 1, 1, 1, on ? 1.0f : 0.55f);
-            else { const UiTex *tb_ = t == 1 ? ic_get("T_KeyBasement") : ic_find("dew");      // tab_icons: the key items tab shows the basement key, materials a coldblood dew
-                if (tb_) { ic_quad(tb_, sx + 11, ty + 11, S - 22, S - 22); if (!on) { glDisable(GL_TEXTURE_2D); hud_rect((sx + 11) * hud_k, (ty + 11) * hud_k, (S - 22) * hud_k, (S - 22) * hud_k, 0.04f, 0.03f, 0.03f, 0.45f); glEnable(GL_TEXTURE_2D); } }
-                else fa_run(t == 1 ? "KEY" : "MAT", sx + (t == 1 ? 14.0f : 11.0f), ty + S * 0.5f - 11.0f, 22.0f, 0.9f, 0.82f, 0.62f, on ? 1.0f : 0.5f, 1); }
+            float sx = px + t * (TS + TG), sy_ = ty + (S - TS) * 0.5f; int on = t == g_inv_tab;
+            mn_slot(sx, sy_, TS, on); glEnable(GL_TEXTURE_2D);
+            const UiTex *tb_ = ic_get(INV_TAB_ICON[t]); if (!tb_) tb_ = t == 1 ? ic_get("T_KeyBasement") : (t == 2 ? ic_find("shard") : NULL);
+            if (tb_) { ic_quad(tb_, sx + 7, sy_ + 7, TS - 14, TS - 14); if (!on) { glDisable(GL_TEXTURE_2D); hud_rect((sx + 7) * hud_k, (sy_ + 7) * hud_k, (TS - 14) * hud_k, (TS - 14) * hud_k, 0.04f, 0.03f, 0.03f, 0.45f); glEnable(GL_TEXTURE_2D); } }
+            else if (t == 0) ui_quad("T_IconBloodVial", sx + 9, sy_ + 9, TS - 18, TS - 18, 1.0f, 1, 1, 1, on ? 1.0f : 0.55f);
+            else { static const char *TA_[INV_TABS] = { "USE", "KEY", "STN", "R", "L", "ATT" }; fa_run(TA_[t], sx + 9.0f, sy_ + TS * 0.5f - 9.0f, 18.0f, 0.9f, 0.82f, 0.62f, on ? 1.0f : 0.5f, 1); }
         }
-        { char tn_[48]; mn_tc(INV_TAB_NAME[g_inv_tab], tn_, sizeof tn_); fb_run(tn_, px + INV_TABS * (S + G) + 14.0f, ty + S * 0.5f - 12.0f, 24.0f, 0.93f, 0.85f, 0.65f, 1.0f, 1); }
+        { char tn_[48]; mn_tc(INV_TAB_NAME[g_inv_tab], tn_, sizeof tn_); fb_run(tn_, px + INV_TABS * 74.0f + 10.0f, ty + S * 0.5f - 11.0f, 22.0f, 0.93f, 0.85f, 0.65f, 1.0f, 1); }
     }
     float gy = ty + S + 34.0f; int selrow = g_inv_sel / INV_COLS, top = selrow - (VIS - 1); if (top < 0) top = 0;
     int rowsTotal = n > 0 ? (n - 1) / INV_COLS + 1 : 1; if (top > rowsTotal - 1) top = rowsTotal - 1; if (top < 0) top = 0;
@@ -8653,7 +8900,7 @@ static void inv_draw_items(int vials, int bullets) {
             inv_slot_icon(&rows[i], sx, sy, S);
             if (rows[i].kind == 3) fb_run("None", sx + 10, sy + S * 0.5f - 8.0f, 15.0f, 0.8f, 0.74f, 0.6f, 1.0f, 1);
             else if ((rows[i].kind == 4 || rows[i].kind == 5) && ic_row(&rows[i])) ic_quad(ic_row(&rows[i]), sx + 10, sy + 10, S - 20, S - 20);
-            else if (rows[i].kind == 5) { const char *ab = (g_mn_assign == 20 ? ATT_HAT_A : ATT_BODY_A)[atoi(rows[i].key)]; float cap = strlen(ab) > 3 ? 14.0f : 17.0f; fa_run(ab, sx + 8.0f, sy + S * 0.5f - cap * 0.5f, cap, 0.95f, 0.9f, 0.75f, 1.0f, 1); }
+            else if (rows[i].kind == 5) { const char *ab = ((g_mn_assign == 20 || rows[i].cat == 20) ? ATT_HAT_A : ATT_BODY_A)[atoi(rows[i].key)]; float cap = strlen(ab) > 3 ? 14.0f : 17.0f; fa_run(ab, sx + 8.0f, sy + S * 0.5f - cap * 0.5f, cap, 0.95f, 0.9f, 0.75f, 1.0f, 1); }
             else if (rows[i].kind == 4) { const char *ab = WPN[atoi(rows[i].key)].abbr; float cap = strlen(ab) > 4 ? 13.0f : 17.0f; fa_run(ab, sx + 8.0f, sy + S * 0.5f - cap * 0.5f, cap, 0.95f, 0.9f, 0.75f, 1.0f, 1); }
             else if (rows[i].kind || rows[i].n > 1) hud_number(rows[i].n, sx + S - 7, sy + S - 28, 2.6f, 1, 1, 1);
         }
@@ -8716,8 +8963,8 @@ static int up_mat_idx(int tier) {      // wpn_upgrade: the bag slot holding that
         if (tier == 3 && (ci_has(k, "rock") || ci_has(l, "rock"))) return i; }
     return -1; }
 static void up_need(int lv, int *tier, int *cnt) { int n = lv + 1; *tier = (n - 1) / 3; if (*tier > 3) *tier = 3; *cnt = *tier >= 3 ? 1 : ((n - 1) % 3) + 1; if (*tier >= 3) { *tier = 2; *cnt = 4; } }      // no_rock: +10 takes 4 chunks instead of a blood rock      // the next level (lv -> lv + 1): +1..+3 shards x1..3, +4..+6 twin shards, +7..+9 chunks, +10 a rock
-static const int UP_W[11] = { 0, 1, 2, 4, 10, 11, 5, 6, 7, 8, 9 };
-static int up_owned(int *out) { int n = 0; for (int i = 0; i < 11; i++) if (g_wown[UP_W[i]]) out[n++] = UP_W[i]; return n; }      // up_owned: the workbench lists only the weapons you own
+static const int UP_W[13] = { 0, 1, 2, 14, 15, 4, 10, 11, 5, 6, 7, 8, 9 };      /* (14: the Burial Blade, listed after the Blood Spear) */
+static int up_owned(int *out) { int n = 0; for (int i = 0; i < 13; i++) if (g_wown[UP_W[i]]) out[n++] = UP_W[i]; return n; }      // up_owned: the workbench lists only the weapons you own
 static const int SHOP_COST[10] = { 120, 50, 60, 90, 30, 70, 450, 550, 40, 500 };      // vial, bullet, antidote, sedative, pebbles (x5), molotov cocktail
 #define BENCH_X 26.5f      /* workbench (weapon upgrades): in the Hunters Workshop map. Its y was given without a sign, so both +27 and -27 count */
 #define BENCH_Y 27.0f
@@ -8753,8 +9000,8 @@ static void draw_hud(float hpf, float stf, float dt, int vials, int bullets, int
         glDisable(GL_BLEND); glEnable(GL_TEXTURE_2D); glEnable(GL_DEPTH_TEST); glEnable(GL_FOG); glEnable(GL_ALPHA_TEST);
         return;
     }
-    { static float nf_; if (!g_gas_dead) nf_ = 0.0f; else if (nf_ < 1.0f && g_cut_t < 0.0f && !g_night_pend && g_night_t <= 0.0f) { nf_ += dt / 14.0f; if (nf_ > 1.0f) nf_ = 1.0f; }      // night_fade: the cold dark blue comes in slowly (14 s) once the cutscene and the 'night grows deep' text are over
-    if (g_gas_dead && nf_ > 0.0f && strcasecmp(cur_map, "huntersdream") && strcasecmp(cur_map, "huntersworkshop")) { glDisable(GL_TEXTURE_2D); hud_rect(-100, -100, 5000, 3000, 0.03f, 0.04f, 0.16f, 0.24f * nf_ * nf_ * (3.0f - 2.0f * nf_)); } }      // night_sys: Deep Night after Father Gascoigne: the world sinks into a cold dark blue
+    { static float nf_; if (!gas_night()) nf_ = 0.0f; else if (nf_ < 1.0f && g_cut_t < 0.0f && !g_night_pend && g_night_t <= 0.0f) { nf_ += dt / 14.0f; if (nf_ > 1.0f) nf_ = 1.0f; }      // night_fade: the cold dark blue comes in slowly (14 s) once the cutscene and the 'night grows deep' text are over
+    if (gas_night() && nf_ > 0.0f && strcasecmp(cur_map, "huntersdream") && strcasecmp(cur_map, "huntersworkshop")) { glDisable(GL_TEXTURE_2D); hud_rect(-100, -100, 5000, 3000, 0.03f, 0.04f, 0.16f, 0.24f * nf_ * nf_ * (3.0f - 2.0f * nf_)); } }      // night_sys: Deep Night after Father Gascoigne: the world sinks into a cold dark blue
 
     if (g_store_ui) store_draw();
     if (g_lamp_ui) {      // lamp_menu: the lantern's menu
@@ -8797,7 +9044,7 @@ static void draw_hud(float hpf, float stf, float dt, int vials, int bullets, int
                 mn_fa(R_[i], px + 8, y, 24.0f, sel ? 1.0f : 0.68f, sel ? 0.95f : 0.66f, sel ? 0.8f : 0.58f, 1.0f, 1); }
             mn_footer(px, Hh, "{D-PAD UP}{D-PAD DOWN}  MOVE      X  SELECT      O  BACK");
         } else {
-            int ow_[11]; int on_ = up_owned(ow_); if (!on_) mn_fa("YOU HAVE NO WEAPON TO UPGRADE", px + 8, py + 70.0f, 22.0f, 0.78f, 0.72f, 0.58f, 1.0f, 1);
+            int ow_[13]; int on_ = up_owned(ow_); if (!on_) mn_fa("YOU HAVE NO WEAPON TO UPGRADE", px + 8, py + 70.0f, 22.0f, 0.78f, 0.72f, 0.58f, 1.0f, 1);
             for (int i = 0; i < on_; i++) { float y = py + 62.0f + i * 40.0f; int sel = i == g_up_sel, w = ow_[i], lv = g_wlv[w];
                 if (sel) { glDisable(GL_TEXTURE_2D); mn_bar((px - 14) * hud_k, (y - 8) * hud_k, (gw + 28) * hud_k, 36.0f * hud_k); }
                 float cr = sel ? 1.0f : 0.68f, cg = sel ? 0.95f : 0.66f, cb = sel ? 0.8f : 0.58f;
@@ -8831,7 +9078,7 @@ static void draw_hud(float hpf, float stf, float dt, int vials, int bullets, int
         } else {
             int np_ = 0, cost_ = 0; for (int i = 0; i < 6; i++) np_ += g_doll_pend[i]; { int L_ = stat_level(); for (int k = 0; k < np_; k++) cost_ += lvl_cost(L_ + k); }
             char b_[64]; snprintf(b_, sizeof b_, "LEVEL  %d  >  %d", stat_level(), stat_level() + np_); mn_fa(b_, px + 8, py + 62.0f, 24.0f, 0.97f, 0.92f, 0.78f, 1.0f, 1);
-            { int w_ = wpn_r(); int sw_ = (w_ >= 0 && w_ < 12) ? w_ : 3; snprintf(b_, sizeof b_, "%s  STR %d%%  SKL %d%%", w_ >= 0 ? WPN[w_].abbr : "FIST", (int)(WSCAL[sw_][0] * 100.0f + 0.5f), (int)(WSCAL[sw_][1] * 100.0f + 0.5f)); float vw_ = mn_fa(b_, 0, 0, 18.0f, 0, 0, 0, 0, 0); mn_fa(b_, px + gw - vw_, py + 66.0f, 18.0f, 0.78f, 0.72f, 0.58f, 1.0f, 1); }
+            { int w_ = wpn_r(); int sw_ = (w_ >= 0 && w_ < NWPN) ? w_ : 3; snprintf(b_, sizeof b_, "%s  STR %d%%  SKL %d%%", w_ >= 0 ? WPN[w_].abbr : "FIST", (int)(WSCAL[sw_][0] * 100.0f + 0.5f), (int)(WSCAL[sw_][1] * 100.0f + 0.5f)); float vw_ = mn_fa(b_, 0, 0, 18.0f, 0, 0, 0, 0, 0); mn_fa(b_, px + gw - vw_, py + 66.0f, 18.0f, 0.78f, 0.72f, 0.58f, 1.0f, 1); }
             snprintf(b_, sizeof b_, "BLOOD ECHOES  %d", g_echoes); mn_fa(b_, px + 8, py + 98.0f, 20.0f, 0.78f, 0.72f, 0.58f, 1.0f, 1);
             snprintf(b_, sizeof b_, "COST  %d", np_ ? cost_ : lvl_cost(stat_level())); mn_fa(b_, px + 8, py + 128.0f, 20.0f, np_ && g_echoes < cost_ ? 0.9f : 0.78f, np_ && g_echoes < cost_ ? 0.4f : 0.72f, np_ && g_echoes < cost_ ? 0.35f : 0.58f, 1.0f, 1);
             static const char *SN_[6] = { "VITALITY", "ENDURANCE", "STRENGTH", "SKILL", "BLOODTINGE", "ARCANE" };
@@ -9210,6 +9457,7 @@ static int n_en = 0;
 #define RAT_YAW       0.0f      /* extra turn (radians) if the rat model faces the wrong way */
 #define CROW_YAW      0.0f
 enum { E_IDLE, E_CHASE, E_ATTACK, E_HURT, E_DEAD };
+static int cwpick(const Char *c, const char *a);      /* (defined further down) */
 #define EN_NPC(t) ((t) == 19 || (t) == 20 || (t) == 21 || (t) == 22 || (t) == 23 || (t) == 24)      // friendly NPCs standing in the world: 19 Eileen, 20 Henryk (arena_scene)
 typedef struct {
     int ok, placed, state, hits, stagger;                 // hits: bit mask of the swing halves that already connected
@@ -9220,6 +9468,7 @@ typedef struct {
     float vx, vy, run_v, walk_v;
     int a_idle, a_walk, a_run, a_atk[4], n_atk, a_hurt[2], n_hurt, a_death, next_atk, next_hurt;
     float fs_acc, fs_x, fs_y;            // footstep distance accumulator (rats)
+    float xf, xf_t; int xf_dir;      /* henryk_xform: how far his saw cleaver is unfolded (0 closed .. 1 open) */
     int leave; float lv_t, lv_vis, hide_end;       // henryk_leave: 0 stays, 1 walks to the lamp, 2 dissolves in smoke, 3 gone
     int ally, tgt; float tgt_t, down_t;    // hk_fight: Eileen fighting on your side (ally); Henryk's target (0 you, 1 Eileen) and how long it holds; Eileen's time on the ground
     int hostile, a_fight;                // eileen_boss: 1 = Eileen has turned on you; a_fight = her fighting idle
@@ -9235,7 +9484,7 @@ typedef struct {
     float ng_m; float hp_max, aggro, reach, dmg, cz, bod, hrad, zlo, zhi, stop, atk_rate, loco_rate, yaw_off, hx, hy, hz, hyaw, jump_t; int cfg_always_run, fixed;
     Char ch;                             // shares the model/animations with the others but has its own pose buffers
 } Enemy;
-static double g_prof_e[3]; static int g_en_st[5];      // enemy physics us, pose+skin us, calls per state (idle/chase/attack/hurt/dead): see the prof line in maplog.txt
+static double g_prof_e[3]; static double g_prof_rm[2]; static int g_en_st[5];      // enemy physics us, pose+skin us, calls per state (idle/chase/attack/hurt/dead): see the prof line in maplog.txt
 // Device switches (BP_Switch placed in a map): each opens the nearest "locked by device" door, if it is within 12 m. Positions are from the map data.
 static const struct { const char *map; float x, y, z; } DEVSW_OLD[] = { { "streets1", 8.6f, -20.09f, -21.16f }, { "gilbert", -13.85f, 51.15f, 6.5f } };      // used when a map has no levers_<map>.txt
 typedef struct { float x, y, z, yaw; } Lever; static Lever g_lev[16]; static int g_nlev;      // lever_mesh: levers_<map>.txt (x y z yaw|name) = every BP_Switch placed in the map; also the device switches
@@ -9420,7 +9669,10 @@ static int near_devsw(float x, float y, float z) {                  // the switc
     }
     return -1;
 }
-static int cb_map(void) { return !strcasecmp(cur_map, "clericbeastarena"); }
+static int moon_map(void) { return !strcasecmp(cur_map, "moonarena"); }      /* moon_arena: the Moon Presence's water arena (level_moonarena.bin from make_moonarena.py): it runs on the Amygdala's boss code */
+static int rl_map(void) { return !strcasecmp(cur_map, "romlake"); }      /* rom_fight: Rom's own lake (level_romlake.bin from make_romlake.py): Rom, the Vacuous Spider and her children; like the Moon Presence's, it runs on the beast boss code */
+static int rom_map(void) { return !strcasecmp(cur_map, "romarena") || moon_map() || rl_map(); }
+static int cb_map(void) { return !strcasecmp(cur_map, "clericbeastarena") || rom_map(); }      // (the Amygdala reuses the Cleric Beast's boss code)
 static int gb_map(void) { return !strcasecmp(cur_map, "ge_bossarena"); }      // gilbert_boss: the cabin
 static int bb_map(void) { return cb_map() || gb_map(); }      // a single-model beast boss (not Gascoigne)
 static void maplog(const char *fmt, const char *a, const char *b);
@@ -9449,6 +9701,11 @@ static BSmoke g_smk[SMK_MAX]; static GLuint smokeTex;
 static BDrop g_bl[BL_MAX]; static BSplat g_spl[SPL_MAX]; static int g_spl_n;
 static GLuint bloodDropTex, bloodSplatTex;
 static float g_plx, g_ply, g_plz, g_shake, g_plface;
+static float g_lb_hp[5], g_lb_pt[3]; static int g_lb_broke, g_lb_pt_ok, g_lb_req;      /* limb_break: the three beast bosses have limbs that break (0 right arm, 1 left arm, 2 head, 3 legs, 4 tail); g_lb_pt = where your blade was when it struck */
+static void limb_reset(void);
+static const char g_velf_pad[6000] __attribute__((used)) = { 1 };      /* velf_pad: padding only. vita-elf-create needs about 3.5 KB of free room straight after the program's code, before its data starts; the last build happened to end just short of that ("Cannot allocate 3524 bytes for SCE data at end of segment 0"). These bytes move the end of the code so the room is there again. If that error ever comes back, change 6000 to another size (say 12000) */
+static float g_slow_t, g_slow_k = 1.0f;      /* boss_cine: the whole game runs at g_slow_k of its speed for g_slow_t more (real) seconds: the killing blow, a visceral, a phase change, a heavy hit. An empty ux0:data/bbpsx/cine_off.txt turns it off */
+static void cine_slow(float secs, float k) { (void)secs; (void)k; }      /* boss_cine: slow motion is switched off (asked for): the flashes and camera shake at those moments stay */
 typedef struct { uint16_t v[3]; float b0, b1, size, rot, age, life; } Stain;      // blood on the Hunter: stuck to a triangle of his model (corner indices + where in it), so it moves with his animation
 #define STAIN_MAX 130
 static Stain g_stain[STAIN_MAX]; static int g_stain_n; static GLuint stainTex;
@@ -9492,8 +9749,19 @@ static int g_cb_hide, g_cb_hide_ok; static float g_cb_z0;      // cb_intro: he w
 static int g_cb_landed;      // cb_intro: the leap has touched down (the slam of the animation lands now)
 static int g_cb_intro;      // cb_intro: 1 the beast leaps in from his spawn, 2 he roars
 static int g_gh_chain, g_gh_atkn, g_pl_heal_go, g_pl_shot_go, g_pl_atk_go; static float g_gh_punish, g_gh_pcd, g_gh_atkwin;      /* gh_hard: Gehrman's combo length left / your attack count / your heal, shot and swing events / delayed punish timer, its cooldown, the attack-string window */
+static int g_gb_leap, g_gb_chain; static float g_gb_l0[3], g_gb_l1[3], g_gb_lcd, g_gb_ft;      // gb_ai: a leap between floors in progress (from, to), the time until the next one, a combo left, the next fire trail
 typedef struct { float x, y, z, t, tick; } GhFire; static GhFire g_ghf[4];      /* gh_hard: the torch's burning ground (phase 2) */
+static void moon_fx_reset(void);
+static int g_mp_drain, g_mp_drain_req, g_amg_arms; static float g_mp_drain_cd, g_mp_open_t; static void cb_roar_shake(float amt);      /* real_feel: the Moon Presence's blood drain (0 none, 1 roaring, 2 done) and the opening after it; the Amygdala has torn his arms off */
 static int g_pl_roll_go, g_cb_chain, g_cb_p2; static float g_cb_punish, g_cb_pcd, g_cb_rate_x = 1.0f;      // cb_hard: the player rolled / combo length left / rage announced / delayed punish timer / its cooldown / speed of a lunge
+static float g_burn_dmg;      /* burning ground: damage that hurts without a flinch, so you can still move or roll out of the fire */
+static float g_pl_pend[2], g_cam_lag[2];      /* smooth shove: pending knockback eased in over frames; camera lag so the view glides after a push */
+static float g_pl_pull[2];      /* gh_redo: the boss drags / shoves you: a sideways step the main loop applies (through the world's collision) next frame */
+static float g_gh_warp = 1.0f;      /* gh_delay: how fast the current blow is playing against its normal pace */
+typedef struct { float x, y, z, dx, dy, t; int on, hit; } GhWave; static GhWave g_gwv[3];      /* gh_wave: the crescents of light his scythe throws */
+typedef struct { float x, y, z, r, sp, dm, t; int a, hit; } GhRing; typedef struct { float x, y, z, fuse; int on; } GhBlast;      /* gh_redo: an expanding gust / a ground blast about to go off */
+static GhRing g_gring[4]; static GhBlast g_gbl[4]; static float g_gh_arc_cd, g_gh_pull_cd, g_gh_step_cd, g_gh_seq_t, g_gh_tr[6][4], g_gh_lx, g_gh_ly; static int g_gh_seq, g_gh_qdone, g_gh_shit;
+static void gh_fx_reset(void);
 static int g_pl_windup, g_pl_stagged, g_pl_stag_req, g_pl_visc_hit, g_pvisc_go, g_pvisc_abort, g_pvisc_n; static float g_pstag_cd;     // Gascoigne staggering / viscerating the player (see boss_update)
 static int g_fire_dot;      /* burn ticks: damage with no flinch, no hurt sound and no blood */
 static int g_vshake, g_blood_gun, g_gush_idx = -1; static float g_gush_t;      // g_blood_gun: the hit is a pistol shot (sprays forward only); g_gush: a visceral's fountain                                   // the Hunter's position, kept up to date for the direction of sprays
@@ -9507,23 +9775,38 @@ static int g_vshake, g_blood_gun, g_gush_idx = -1; static float g_gush_t;      /
 #define MUS_VOICE 4                        /* voice 4: the music */
 #define AMB_VOICES 5                       /* voices below this are never given to one-shot sounds */
 static void music_boss(int ev);
-enum { S_SWING, S_SWING_HEAVY, S_HIT, S_GUN, S_PARRY, S_VISC, S_ENEMY_SWING, S_BOSS_SWING, S_PLAYER_HURT, S_ENEMY_DEATH, S_DODGE, S_RAT_ATK, S_CROW_ATK, S_ENEMY_HURT, S_RAT_HURT, S_RAT_DEATH, S_CROW_DEATH, S_BOSS_SWING_B, S_BOSS_HURT, S_BOSS_DEATH, S_PLAYER_DEATH, S_STEP, S_LADDER, S_DOOR, S_DOOR_BIG, S_SWITCH, S_LIFT, S_DRINK, S_PICKUP, S_ECHO, S_YOUDIED, S_FOG, S_BOSS_AXE, S_BOSS_BEAST, S_BOSS_YELL, S_BOSS_STEP, S_BEAST_STEP, S_BOSS_DASH, S_BOSS_GROWL, S_GUN_DRAW, S_HOLSTER, S_GUN_EMPTY, S_RECOVER, S_LANTERN, S_REFRESH, S_BULLET, S_AGGRO, S_UIBAD, S_STEP_WOOD, S_STEP_WATER, S_SPLASH, S_BOULDER, S_BOULDER_HIT, S_RAT_STEP, S_AMB_WIND, S_AMB_RAIN, S_AMB_WATER, S_AMB_LAMP, S_THUNDER, S_LIGHTNING, S_BELL, S_CB_SWING, S_CB_STEP, S_CB_HOWL, S_CB_HURT, S_CB_DEATH, S_CB_ROAR, S_CB_IMPACT, S_E_OH, S_E_MESS, S_E_WELCOME, S_E_AGGRO, S_E_TAUNT, S_E_KILL, S_E_DEATH, S_E_LAUGH, S_GH_1, S_GH_2, S_GH_3, S_GH_4, S_GH_5, S_GH_6, S_GH_7, S_W_BLD_CURVE, S_W_BLD_WHIRL, S_W_BLD_GLEAM, S_W_BLD_SLIDE, S_W_BLD_XFORM, S_W_SPEAR_XFORM, S_W_CLEAV_XFORM, S_W_CANE_ASM, S_W_CANE_CHAIN, S_W_SHOT_SHOOT, S_W_SHOT_LOAD, S_W_FLAME_START, S_W_TONI_ACT, S_W_TONI_BREAK, S_MUSICBOX, S_COUNT };
-static const char *SND_NAMES[S_COUNT] = { "swing", "swing_heavy", "hit", "gun", "parry", "visc", "enemy_swing", "boss_swing", "player_hurt", "enemy_death", "dodge", "rat_atk", "crow_atk", "enemy_hurt", "rat_hurt", "rat_death", "crow_death", "boss_swing_b", "boss_hurt", "boss_death", "player_death", "step", "ladder", "door", "door_big", "switch", "lift", "drink", "pickup", "echo", "youdied", "fog", "boss_axe", "boss_beast", "boss_yell", "boss_step", "beast_step", "boss_dash", "boss_growl", "gun_draw", "holster", "gun_empty", "recover", "lantern", "refresh", "bullet", "aggro", "uibad", "step_wood", "step_water", "splash", "boulder", "boulder_hit", "rat_step", "amb_wind", "amb_rain", "amb_water", "amb_lamp", "thunder", "lightning", "bell", "cb_swing", "cb_step", "cb_howl", "cb_hurt", "cb_death", "cb_roar", "cb_impact", "e_oh", "e_mess", "e_welcome", "e_aggro", "e_taunt", "e_kill", "e_death", "e_laugh", "gh_l1", "gh_l2", "gh_l3", "gh_l4", "gh_l5", "gh_l6", "gh_l7", "w_bld_curve", "w_bld_whirl", "w_bld_gleam", "w_bld_slide", "w_bld_xform", "w_spear_xform", "w_cleav_xform", "w_cane_asm", "w_cane_chain", "w_shot_shoot", "w_shot_load", "w_flame_start", "w_toni_act", "w_toni_break", "musicbox" };      // e_aggro / e_taunt / e_kill / e_death: Eileen's fight voice (loaded for the hostile Eileen)
+enum { S_SWING, S_SWING_HEAVY, S_HIT, S_GUN, S_PARRY, S_VISC, S_ENEMY_SWING, S_BOSS_SWING, S_PLAYER_HURT, S_ENEMY_DEATH, S_DODGE, S_RAT_ATK, S_CROW_ATK, S_ENEMY_HURT, S_RAT_HURT, S_RAT_DEATH, S_CROW_DEATH, S_BOSS_SWING_B, S_BOSS_HURT, S_BOSS_DEATH, S_PLAYER_DEATH, S_STEP, S_LADDER, S_DOOR, S_DOOR_BIG, S_SWITCH, S_LIFT, S_DRINK, S_PICKUP, S_ECHO, S_YOUDIED, S_FOG, S_BOSS_AXE, S_BOSS_BEAST, S_BOSS_YELL, S_BOSS_STEP, S_BEAST_STEP, S_BOSS_DASH, S_BOSS_GROWL, S_GUN_DRAW, S_HOLSTER, S_GUN_EMPTY, S_RECOVER, S_LANTERN, S_REFRESH, S_BULLET, S_AGGRO, S_UIBAD, S_STEP_WOOD, S_STEP_WATER, S_SPLASH, S_BOULDER, S_BOULDER_HIT, S_RAT_STEP, S_AMB_WIND, S_AMB_RAIN, S_AMB_WATER, S_AMB_LAMP, S_THUNDER, S_LIGHTNING, S_BELL, S_CB_SWING, S_CB_STEP, S_CB_HOWL, S_CB_HURT, S_CB_DEATH, S_CB_ROAR, S_CB_IMPACT, S_E_OH, S_E_MESS, S_E_WELCOME, S_E_AGGRO, S_E_TAUNT, S_E_KILL, S_E_DEATH, S_E_LAUGH, S_GH_1, S_GH_2, S_GH_3, S_GH_4, S_GH_5, S_GH_6, S_GH_7, S_DL_1, S_DL_2, S_DL_3, S_DL_4, S_DL_5, S_DL_6, S_DL_7, S_DL_8, S_DL_9, S_DL_10, S_DL_11, S_DL_12, S_DL_13, S_DL_14, S_DL_15, S_DL_16, S_W_BLD_CURVE, S_W_BLD_WHIRL, S_W_BLD_GLEAM, S_W_BLD_SLIDE, S_W_BLD_XFORM, S_W_SPEAR_XFORM, S_W_CLEAV_XFORM, S_W_CANE_ASM, S_W_CANE_CHAIN, S_W_SHOT_SHOOT, S_W_SHOT_LOAD, S_W_FLAME_START, S_W_TONI_ACT, S_W_TONI_BREAK, S_MUSICBOX, S_COUNT };
+static const char *SND_NAMES[S_COUNT] = { "swing", "swing_heavy", "hit", "gun", "parry", "visc", "enemy_swing", "boss_swing", "player_hurt", "enemy_death", "dodge", "rat_atk", "crow_atk", "enemy_hurt", "rat_hurt", "rat_death", "crow_death", "boss_swing_b", "boss_hurt", "boss_death", "player_death", "step", "ladder", "door", "door_big", "switch", "lift", "drink", "pickup", "echo", "youdied", "fog", "boss_axe", "boss_beast", "boss_yell", "boss_step", "beast_step", "boss_dash", "boss_growl", "gun_draw", "holster", "gun_empty", "recover", "lantern", "refresh", "bullet", "aggro", "uibad", "step_wood", "step_water", "splash", "boulder", "boulder_hit", "rat_step", "amb_wind", "amb_rain", "amb_water", "amb_lamp", "thunder", "lightning", "bell", "cb_swing", "cb_step", "cb_howl", "cb_hurt", "cb_death", "cb_roar", "cb_impact", "e_oh", "e_mess", "e_welcome", "e_aggro", "e_taunt", "e_kill", "e_death", "e_laugh", "gh_l1", "gh_l2", "gh_l3", "gh_l4", "gh_l5", "gh_l6", "gh_l7", "doll_1", "doll_2", "doll_3", "doll_4", "doll_5", "doll_6", "doll_7", "doll_8", "doll_9", "doll_10", "doll_11", "doll_12", "doll_13", "doll_14", "doll_15", "doll_16", "w_bld_curve", "w_bld_whirl", "w_bld_gleam", "w_bld_slide", "w_bld_xform", "w_spear_xform", "w_cleav_xform", "w_cane_asm", "w_cane_chain", "w_shot_shoot", "w_shot_load", "w_flame_start", "w_toni_act", "w_toni_break", "musicbox" };      // e_aggro / e_taunt / e_kill / e_death: Eileen's fight voice (loaded for the hostile Eileen)
 typedef struct { int16_t *d; int n; float step; } Snd;       // step: playback step for clips kept at their own sample rate (music)
-typedef struct { const int16_t *d; int n; double pos, step; float vl, vr; volatile int loop; const int16_t *volatile cd; int cn, cloop; double cstep; volatile int on; volatile int cat; } Voice;      // cd..: the clip that follows this one without a gap (music intro -> loop)
+typedef struct { const int16_t *d; int n; double pos, step; float vl, vr; volatile int loop; const int16_t *volatile cd; int cn, cloop; double cstep; volatile int on; volatile int cat; float lp, lz, lz2, lz3, rv, pk; int dly, pri; } Voice;      /* audio_fx: lp = muffling (1 = clear, small = dull), lz its filter memory, rv = how much goes to the echo, dly = samples to wait before it starts, pri = never stolen, pk = how loud it was started */      // cd..: the clip that follows this one without a gap (music intro -> loop)
 static Snd g_snd[S_COUNT][SND_VAR]; static int g_snd_nv[S_COUNT], g_snd_last[S_COUNT];
 static Voice g_vo[NVOICE];
+/* ---- audio_fx: echo by place, muffling, and a proper mix.
+   echo: a small reverb (four feedback delays and two diffusers) fed by every sound effect and voice; how loud and how long it rings follows where you stand (snd_place_update): long under a roof, with a high ceiling longer still, short out of doors.
+   muffling: a sound whose source is behind a wall, or far away, loses its top end (a one-pole low-pass per voice) as well as some volume.
+   mix: music and the ambient loops duck under loud effects and under speech, effects dip a little under speech, a gain-riding limiter holds the peaks (the old soft clip stays as a safety net), the same sound started several times at once no longer stacks to full volume, panning keeps the level even across the stereo field, and when every voice is busy a new sound replaces the quietest old one instead of being dropped. */
+static volatile float g_rv_wet = 0.06f, g_rv_fb = 0.72f, g_rv_damp = 0.35f; static float g_nx_lp = 1.0f, g_nx_rv = -1.0f; static int g_nx_dly, g_nx_pri; static volatile unsigned g_snd_tick; static unsigned g_snd_when[512]; static int g_audio_fx = 1;      /* audio_fx_off.txt on the card turns the echo, muffling and ducking off (the plain mixer) */
 static int g_snd_port = -1, g_snd_run; static SceUID g_snd_thread = -1;
 static float g_camfx = 1.0f, g_camfy = 0.0f, g_snd_master = 0.7f;
 // ---- volume_ctl: three volume sliders (SYSTEM menu): 0 sound effects, 1 background (ambient loops, music, thunder, bells), 2 voices; saved in volume.txt as percent
-static float g_vlm[3] = { 1.0f, 1.0f, 1.0f }; static int g_vlm_pc[3] = { 100, 100, 100 }; static uint8_t g_snd_cat[S_COUNT];
+static int g_fps_cap = 60;      /* fps_cap: 60, 30 or 24 frames a second (System menu, fps.txt) */
+static void fps_cap_step(int d) { static const int V_[3] = { 60, 30, 24 }; int i = 0; for (int k = 0; k < 3; k++) if (V_[k] == g_fps_cap) i = k; i = (i + d + 3) % 3; g_fps_cap = V_[i]; FILE *f_ = fopen("ux0:data/bbpsx/fps.txt", "w"); if (f_) { fprintf(f_, "%d\n", g_fps_cap); fclose(f_); } }
+static void fps_limit(void) {      /* fps_cap: after the swap, wait on the screen refresh until enough time has passed since the previous frame was let go: 25 ms for 30 fps (two refreshes), 25 / 41.7 ms alternating for 24 fps (two, then three). The old version counted waits, but one wait can return at once, so a frame counter showed 60 for the 30 cap and 40 for the 24 cap. */
+    static int tog_ = 0; static uint64_t prev_ = 0; uint64_t now_ = sceKernelGetProcessTimeWide();
+    if (g_fps_cap < 60 && prev_) {
+        int n_ = g_fps_cap == 30 ? 2 : ((tog_ ^= 1) ? 3 : 2); uint64_t need_ = (uint64_t)(((float)n_ - 0.5f) * 16683.0f);
+        int g_ = 0; while (now_ - prev_ < need_ && g_++ < 8) { sceDisplayWaitVblankStart(); now_ = sceKernelGetProcessTimeWide(); }
+    }
+    prev_ = now_;
+}
+static float g_vlm[3] = { 0.3f, 0.2f, 0.3f }; static int g_vlm_pc[3] = { 30, 20, 30 };      /* new player defaults */ static uint8_t g_snd_cat[S_COUNT];
 static void vol_save(void) { FILE *f = fopen("ux0:data/bbpsx/volume.txt", "w"); if (f) { fprintf(f, "%d %d %d\n", g_vlm_pc[0], g_vlm_pc[1], g_vlm_pc[2]); fclose(f); } }
 static void vol_set(int k, int pc) { if (pc < 0) pc = 0; if (pc > 100) pc = 100; g_vlm_pc[k] = pc; g_vlm[k] = pc * 0.01f; }
 static void vol_init(void) {
     FILE *f = fopen("ux0:data/bbpsx/volume.txt", "r"); if (f) { int a, b, c; if (fscanf(f, "%d %d %d", &a, &b, &c) == 3) { vol_set(0, a); vol_set(1, b); vol_set(2, c); } fclose(f); }
     for (int i = 0; i < S_COUNT; i++) { const char *n = SND_NAMES[i]; size_t l = strlen(n); int c = 0;
         if (!strncmp(n, "amb_", 4) || !strcmp(n, "thunder") || !strcmp(n, "lightning") || !strcmp(n, "bell")) c = 1;
-        else if (!strncmp(n, "e_", 2) || !strncmp(n, "gh_l", 4) || !strcmp(n, "aggro") || (l > 5 && !strcmp(n + l - 5, "_hurt")) || (l > 6 && !strcmp(n + l - 6, "_death")) || strstr(n, "yell") || strstr(n, "growl") || strstr(n, "roar") || strstr(n, "howl") || strstr(n, "laugh") || !strcmp(n, "youdied")) c = 2;
+        else if (!strncmp(n, "e_", 2) || !strncmp(n, "gh_l", 4) || !strncmp(n, "doll_", 5) || !strcmp(n, "aggro") || (l > 5 && !strcmp(n + l - 5, "_hurt")) || (l > 6 && !strcmp(n + l - 6, "_death")) || strstr(n, "yell") || strstr(n, "growl") || strstr(n, "roar") || strstr(n, "howl") || strstr(n, "laugh") || !strcmp(n, "youdied")) c = 2;
         g_snd_cat[i] = (uint8_t)c; }
 }
 static int g_snd_loop[128];                                         // 1 = an ambient loop slot (long clips, seamless loop)
@@ -9547,7 +9830,13 @@ static int snd_load_wav(const char *path, Snd *out, int maxsec, int fades, int n
         if (!memcmp(ck, "fmt ", 4)) { uint8_t fm[16]; if (sz < 16 || fread(fm, 1, 16, f) != 16) break; ch = fm[2] | (fm[3] << 8); rate = fm[4] | (fm[5] << 8) | (fm[6] << 16) | (fm[7] << 24); bits = fm[14] | (fm[15] << 8); fseek(f, sz - 16 + (sz & 1), SEEK_CUR); }
         else if (!memcmp(ck, "data", 4)) {
             if (bits != 16 || ch < 1 || ch > 2 || sz > 12u * 1024 * 1024) break;
-            int frames = sz / (2 * ch); int16_t *raw = malloc((size_t)frames * ch * 2); if (!raw) break;
+            int frames = sz / (2 * ch);
+            if (native && ch == 1 && !fades) {      /* long mono music at its own rate: read straight into the sound buffer (no second copy, so a 9 MB track needs 9 MB of heap, not 19 MB) */
+                int n1 = frames; if (n1 > maxsec * rate) n1 = maxsec * rate; int16_t *d1 = malloc((size_t)(n1 + 2) * 2); if (!d1) break;
+                if ((int)fread(d1, 2, n1, f) != n1) { free(d1); break; }
+                d1[n1] = d1[n1 + 1] = 0; out->d = d1; out->n = n1; out->step = (float)rate / SND_RATE; ok = 1; break;
+            }
+            int16_t *raw = malloc((size_t)frames * ch * 2); if (!raw) break;
             if ((int)fread(raw, 2 * ch, frames, f) != frames) { free(raw); break; }
             int orate = native ? rate : SND_RATE; int n = (int)((long long)frames * orate / rate); if (n > maxsec * orate) n = maxsec * orate; if (!native && g_snd_bytes + (long)n * 2 > 40L * 1024 * 1024) { free(raw); break; } int16_t *d = malloc((size_t)(n + 2) * 2); if (!d) { free(raw); break; }
             for (int i = 0; i < n; i++) {                                    // downmix and resample to 48 kHz
@@ -9566,21 +9855,56 @@ static int snd_thread_fn(SceSize args, void *argp) {
     snd_log("mixer: running", 0, 0);
     while (g_snd_run) {
         if (g_snd_stage < 4) { sceKernelDelayThread(20000); continue; }
-        memset(acc, 0, sizeof acc); int any_ = 0;
+        static float accA[SND_GRAIN * 2], rin[SND_GRAIN];
+        memset(acc, 0, sizeof acc); memset(accA, 0, sizeof accA); memset(rin, 0, sizeof rin); int any_ = 0, speech_ = 0; g_snd_tick++;
         for (int v = 0; v < NVOICE; v++) {
             Voice *V = &g_vo[v]; if (!V->on) continue; any_ = 1; const float cg_ = v < AMB_VOICES ? g_vlm[1] : g_vlm[V->cat < 3 ? V->cat : 0];
+            int amb_ = v < AMB_VOICES; float *dst_ = amb_ ? accA : acc, lp_ = (!amb_ && g_audio_fx && V->lp > 0.0f && V->lp < 0.999f) ? V->lp : 1.0f, lz_ = V->lz, rv_ = (amb_ || !g_audio_fx) ? 0.0f : V->rv;
+            if (!amb_ && V->cat == 2) speech_ = 1;
             for (int i = 0; i < SND_GRAIN; i++) {
+                if (!amb_ && V->dly > 0) { V->dly--; continue; }
                 int p = (int)V->pos;
                 if (V->loop) { if (p >= V->n) { V->pos -= V->n; p = (int)V->pos; } }
                 else if (p + 1 >= V->n) { if (V->cd) { V->d = V->cd; V->n = V->cn; V->step = V->cstep; V->loop = V->cloop; V->cd = NULL; V->pos = 0.0; p = 0; } else { V->on = 0; break; } }
                 int p1 = p + 1 >= V->n ? 0 : p + 1;
                 float fr = (float)(V->pos - p), s = V->d[p] + (V->d[p1] - V->d[p]) * fr;
-                acc[i * 2] += s * V->vl * cg_; acc[i * 2 + 1] += s * V->vr * cg_; V->pos += V->step;
+                if (V->step < 0.99f && p > 0 && p + 2 < V->n) { float a_ = V->d[p - 1], b_ = V->d[p], c_ = V->d[p + 1], d_ = V->d[p + 2]; s = b_ + 0.5f * fr * (c_ - a_ + fr * (2.0f * a_ - 5.0f * b_ + 4.0f * c_ - d_ + fr * (3.0f * (b_ - c_) + d_ - a_))); }      /* smoother (cubic) playback of low-rate clips: the plain straight-line version leaves a harsh edge on 16 kHz music */
+                if (V->step < 0.8f) { float ia_ = 1.0f - expf(-2.827f * (float)V->step); V->lz2 += ia_ * (s - V->lz2); V->lz3 += ia_ * (V->lz2 - V->lz3); s = V->lz3; }      /* image filter: a clip stored at 16-24 kHz and played at 48 kHz leaves a hissy mirror copy of its highs above its own top frequency (the crackle): two gentle poles take that off */
+                if (lp_ < 1.0f) { lz_ += lp_ * (s - lz_); s = lz_; }
+                dst_[i * 2] += s * V->vl * cg_; dst_[i * 2 + 1] += s * V->vr * cg_; if (rv_ > 0.0f) rin[i] += s * (V->vl + V->vr) * 0.5f * cg_ * rv_; V->pos += V->step;
             }
+            V->lz = lz_;
+        }
+        {   /* the echo */
+            static float cb_[4][2400], cl_[4], ap_[2][400]; static int ci_[4], ai_[2]; static const int CL_[4] = { 1687, 1601, 2053, 2251 }, AL_[2] = { 347, 113 };
+            float wet_ = g_audio_fx ? g_rv_wet : 0.0f, fb_ = g_rv_fb, dm_ = g_rv_damp; static float wetp_ = 0.0f;
+            for (int i = 0; i < SND_GRAIN; i++) {
+                float x = rin[i] + 1e-15f, o_[4];
+                for (int c = 0; c < 4; c++) { float y = cb_[c][ci_[c]]; cl_[c] = y * (1.0f - dm_) + cl_[c] * dm_; cb_[c][ci_[c]] = x + cl_[c] * fb_; if (++ci_[c] >= CL_[c]) ci_[c] = 0; o_[c] = y; }
+                float l_ = o_[0] + o_[2] + 0.3f * (o_[1] + o_[3]), r_ = o_[1] + o_[3] + 0.3f * (o_[0] + o_[2]);
+                { float b_ = ap_[0][ai_[0]]; ap_[0][ai_[0]] = l_ + b_ * 0.5f; l_ = b_ - l_ * 0.5f; if (++ai_[0] >= AL_[0]) ai_[0] = 0; }
+                { float b_ = ap_[1][ai_[1]]; ap_[1][ai_[1]] = r_ + b_ * 0.5f; r_ = b_ - r_ * 0.5f; if (++ai_[1] >= AL_[1]) ai_[1] = 0; }
+                float w_ = wetp_ + (wet_ - wetp_) * ((float)i / SND_GRAIN);
+                acc[i * 2] += l_ * w_ * 0.22f; acc[i * 2 + 1] += r_ * w_ * 0.22f;
+            }
+            wetp_ = wet_;
+        }
+        {   /* the mix: duck the background under loud effects and under speech, then ride the peaks */
+            static float duck_ = 1.0f, sfx_ = 1.0f, lim_ = 1.0f; float pk_ = 0.0f, k_ = g_snd_master * (1.0f / 32768.0f);
+            for (int i = 0; i < SND_GRAIN * 2; i++) { float a_ = acc[i] < 0.0f ? -acc[i] : acc[i]; if (a_ > pk_) pk_ = a_; }
+            pk_ *= k_;
+            float dt_ = 1.0f - (pk_ - 0.2f) * 1.3f; if (dt_ > 1.0f) dt_ = 1.0f; if (dt_ < 0.5f) dt_ = 0.5f; if (speech_ && dt_ > 0.65f) dt_ = 0.65f; if (!g_audio_fx) dt_ = 1.0f;
+            float d0_ = duck_, s0_ = sfx_; duck_ += (dt_ < duck_ ? 0.6f : 0.04f) * (dt_ - duck_); { float st_ = (speech_ && g_audio_fx) ? 0.8f : 1.0f; sfx_ += 0.2f * (st_ - sfx_); }
+            float pf_ = 0.0f;
+            for (int i = 0; i < SND_GRAIN; i++) { float t_ = (float)i / SND_GRAIN, dg_ = d0_ + (duck_ - d0_) * t_, sg_ = s0_ + (sfx_ - s0_) * t_;
+                acc[i * 2] = acc[i * 2] * sg_ + accA[i * 2] * dg_; acc[i * 2 + 1] = acc[i * 2 + 1] * sg_ + accA[i * 2 + 1] * dg_;
+                float a_ = acc[i * 2] < 0.0f ? -acc[i * 2] : acc[i * 2], b_ = acc[i * 2 + 1] < 0.0f ? -acc[i * 2 + 1] : acc[i * 2 + 1]; if (a_ > pf_) pf_ = a_; if (b_ > pf_) pf_ = b_; }
+            pf_ *= k_; float lt_ = pf_ > 0.74f ? 0.74f / pf_ : 1.0f, l0_ = lim_; if (lt_ < lim_) lim_ = lt_; else lim_ += 0.03f * (lt_ - lim_);
+            if (l0_ < 0.999f || lim_ < 0.999f) for (int i = 0; i < SND_GRAIN; i++) { float t_ = (float)i / (SND_GRAIN * 0.25f); if (t_ > 1.0f) t_ = 1.0f; float g_ = l0_ + (lim_ - l0_) * t_; acc[i * 2] *= g_; acc[i * 2 + 1] *= g_; }      /* (the gain comes down over the first quarter of the buffer; the soft clip below catches what gets through) */
         }
         for (int i = 0; i < SND_GRAIN * 2; i++) {                      // gentle limiter instead of hard clipping when several sounds stack up
             float y = acc[i] * g_snd_master * (1.0f / 32768.0f), a = y < 0.0f ? -y : y;
-            if (a > 0.7f) { float t = 0.7f + 0.3f * tanhf((a - 0.7f) * (1.0f / 0.3f)); y = y < 0.0f ? -t : t; }
+            if (a > 0.85f) { float t = 0.85f + 0.15f * tanhf((a - 0.85f) * (1.0f / 0.15f)); y = y < 0.0f ? -t : t; }
             if (any_) { static uint32_t rs_ = 2463534242u; rs_ ^= rs_ << 13; rs_ ^= rs_ >> 17; rs_ ^= rs_ << 5; static float rp_; float r_ = (float)(rs_ & 0xFFFFu) * (1.0f / 65536.0f); y = y * 32767.0f + (r_ - rp_); rp_ = r_; }      // dither: quiet sounds (the ambient loops turned right down) were cut off at the last bit, which is a steady fizz; a tiny shaped noise turns that into a far fainter hiss (only while something plays, so silence stays silent)
             else y *= 32767.0f;
             y += y < 0.0f ? -0.5f : 0.5f; if (y > 32767.0f) y = 32767.0f; if (y < -32768.0f) y = -32768.0f;
@@ -9593,6 +9917,7 @@ static int snd_thread_fn(SceSize args, void *argp) {
     return 0;
 }
 static void snd_init(void) {
+    { FILE *f_ = fopen("ux0:data/bbpsx/audio_fx_off.txt", "r"); if (f_) { fclose(f_); g_audio_fx = 0; } }
     int total = 0; g_snd_cap[S_STEP] = 2; g_snd_fade[S_LANTERN] = 2200; g_snd_loop[S_AMB_WIND] = g_snd_loop[S_AMB_RAIN] = g_snd_loop[S_AMB_WATER] = g_snd_loop[S_AMB_LAMP] = 1; g_snd_fade[S_THUNDER] = 1800; g_snd_fade[S_BELL] = 1800;
     { static const struct { int s, ms; } cf[] = { {S_SWING,160},{S_SWING_HEAVY,220},{S_HIT,160},{S_GUN,450},{S_PARRY,300},{S_VISC,450},{S_ENEMY_SWING,160},{S_BOSS_SWING,220},{S_BOSS_SWING_B,220},{S_PLAYER_HURT,250},{S_ENEMY_DEATH,350},{S_DODGE,140},{S_RAT_ATK,200},{S_CROW_ATK,250},{S_ENEMY_HURT,220},{S_RAT_HURT,180},{S_RAT_DEATH,250},{S_CROW_DEATH,250},{S_BOSS_HURT,260},{S_BOSS_DEATH,600},{S_BOSS_YELL,300},{S_BOSS_DASH,250},{S_BOSS_GROWL,350},{S_BOSS_AXE,300},{S_BOSS_BEAST,500},{S_LIGHTNING,1400},{S_BOULDER_HIT,300},{S_SPLASH,250} };
       for (unsigned i = 0; i < sizeof cf / sizeof cf[0]; i++) if (!g_snd_fade[cf[i].s]) g_snd_fade[cf[i].s] = cf[i].ms; }   // combat tails fade out instead of cutting                              // footsteps: only the first two files
@@ -9608,7 +9933,7 @@ static void snd_init(void) {
         char path[128]; snprintf(path, sizeof path, "ux0:data/bbpsx/snd/%s_%d.wav", SND_NAMES[s], v + 1);
         if (total >= g_snd_maxfiles) break;
         { struct mallinfo mi = mallinfo(); snd_log(path, (int)(mi.uordblks / 1024), (int)(mi.arena / 1024)); }          // heap in use / heap size, KB, before each file
-        if (snd_load_wav(path, &g_snd[s][g_snd_nv[s]], g_snd_loop[s] ? 24 : (s == S_MUSICBOX ? 16 : ((s >= S_E_OH && s <= S_GH_7) ? 30 : 4)), !g_snd_loop[s], 0)) {
+        if (snd_load_wav(path, &g_snd[s][g_snd_nv[s]], g_snd_loop[s] ? 24 : (s == S_MUSICBOX ? 16 : ((s >= S_E_OH && s <= S_DL_16) ? 30 : 4)), !g_snd_loop[s], 0)) {
             Snd *q = &g_snd[s][g_snd_nv[s]];
             if (g_snd_loop[s] && q->n > SND_RATE) {                      // make it loop seamlessly: blend the tail into the head and drop the tail
                 int xf = SND_RATE * 3 / 4; if (xf > q->n / 3) xf = q->n / 3;
@@ -9635,15 +9960,33 @@ static void snd_quit(void) {
     g_snd_run = 0; if (g_snd_thread >= 0) { sceKernelWaitThreadEnd(g_snd_thread, NULL, NULL); sceKernelDeleteThread(g_snd_thread); g_snd_thread = -1; }
     if (g_snd_port >= 0) { sceAudioOutReleasePort(g_snd_port); g_snd_port = -1; }
 }
+static Voice g_vpend[4];      /* sounds waiting one frame for a voice that was taken from a quieter sound */
+static void snd_pend_flush(void) {
+    for (int q = 0; q < 4; q++) { Voice *P = &g_vpend[q]; if (!P->on) continue; P->on = 0;
+        int vi = -1; for (int i = AMB_VOICES; i < NVOICE; i++) if (!g_vo[i].on) { vi = i; break; } if (vi < 0) continue;
+        Voice *V = &g_vo[vi]; V->d = P->d; V->n = P->n; V->pos = 0.0; V->step = P->step; V->vl = P->vl; V->vr = P->vr; V->loop = 0; V->cd = NULL; V->cat = P->cat; V->lp = P->lp; V->lz = 0.0f; V->lz2 = V->lz3 = 0.0f; V->rv = P->rv; V->dly = P->dly; V->pri = P->pri; V->pk = P->pk; __sync_synchronize(); V->on = 1; }
+}
 static void snd_play_lr(int slot, float vl, float vr, float pitch) {
     if (!g_snd_run) return;
     if (slot == S_SWING_HEAVY && !g_snd_nv[slot]) slot = S_SWING;
     if (slot < 0 || slot >= S_COUNT || !g_snd_nv[slot]) return;
     int n = g_snd_nv[slot]; if (g_snd_cap[slot] && n > g_snd_cap[slot]) n = g_snd_cap[slot];
     int k = (int)(frand() * n) % n; if (n > 1 && k == g_snd_last[slot]) k = (k + 1) % n; g_snd_last[slot] = k;
+    float nlp_ = g_nx_lp, nrv_ = g_nx_rv; int ndl_ = g_nx_dly, npr_ = g_nx_pri; g_nx_lp = 1.0f; g_nx_rv = -1.0f; g_nx_dly = 0; g_nx_pri = 0;
+    if (g_audio_fx && slot < 512) { unsigned t_ = g_snd_tick; if (g_snd_when[slot] && t_ - g_snd_when[slot] < 2u && !ndl_) { vl *= 0.6f; vr *= 0.6f; } g_snd_when[slot] = t_ ? t_ : 1u; }      /* the same sound again within about 40 ms (three enemies hit by one swing): quieter, so they do not add up to a bang */
     int vi = -1; for (int i = AMB_VOICES; i < NVOICE; i++) if (!g_vo[i].on) { vi = i; break; }
+    if (vi < 0 && g_audio_fx) {      /* every voice busy: the quietest old sound that is not protected makes way, if it is quieter than this one */
+        float q_ = vl + vr; for (int i = AMB_VOICES; i < NVOICE; i++) { const Voice *o_ = &g_vo[i]; if (o_->pri || o_->loop || o_->cd) continue; float l_ = o_->pk * (o_->n > 0 ? 1.0f - 0.7f * (float)(o_->pos / o_->n) : 1.0f); if (l_ < q_) { q_ = l_; vi = i; } }
+        if (vi >= 0) {      /* (the old sound is stopped now; the new one starts on the next frame, once the mixer has let go of that voice: its fields must not change under the mixer's feet) */
+            g_vo[vi].on = 0; __sync_synchronize();
+            for (int q = 0; q < 4; q++) if (!g_vpend[q].on) { Voice *P = &g_vpend[q]; memset(P, 0, sizeof *P); P->d = g_snd[slot][k].d; P->n = g_snd[slot][k].n; P->step = pitch * g_snd[slot][k].step; P->vl = vl; P->vr = vr; P->cat = g_snd_cat[slot]; P->lp = nlp_; P->rv = nrv_ >= 0.0f ? nrv_ : (P->cat == 0 ? 1.0f : (P->cat == 2 ? 0.6f : 0.5f)); P->dly = ndl_; P->pri = npr_; P->pk = vl + vr; P->on = 1; break; }
+            return;
+        }
+    }
     if (vi < 0) return;
-    Voice *V = &g_vo[vi]; V->d = g_snd[slot][k].d; V->n = g_snd[slot][k].n; V->pos = 0.0; V->step = pitch * g_snd[slot][k].step; V->vl = vl; V->vr = vr; V->loop = 0; V->cd = NULL; V->cat = g_snd_cat[slot]; __sync_synchronize(); V->on = 1;
+    Voice *V = &g_vo[vi]; V->d = g_snd[slot][k].d; V->n = g_snd[slot][k].n; V->pos = 0.0; V->step = pitch * g_snd[slot][k].step; V->vl = vl; V->vr = vr; V->loop = 0; V->cd = NULL; V->cat = g_snd_cat[slot];
+    V->lp = nlp_; V->lz = 0.0f; V->lz2 = V->lz3 = 0.0f; V->rv = nrv_ >= 0.0f ? nrv_ : (V->cat == 0 ? 1.0f : (V->cat == 2 ? 0.6f : 0.5f)); V->dly = ndl_; V->pri = npr_ || slot == S_PLAYER_HURT || slot == S_PARRY || slot == S_VISC || slot == S_PLAYER_DEATH || slot == S_YOUDIED; V->pk = vl + vr;
+    __sync_synchronize(); V->on = 1;
 }
 // transform sound for the saw cleaver / blood spear / cane: the first 0.25 s of the switch clip, faded out  (xform_snd)
 static int16_t *g_xf_d[SND_VAR]; static int g_xf_n[SND_VAR];
@@ -9655,10 +9998,10 @@ static void snd_xform(float vol) {
         int fn = n * 2 / 3; for (int i = 0; i < n; i++) { float g = 1.0f; if (i >= n - fn) { g = (float)(n - i) / (float)fn; g *= g; } g_xf_d[k][i] = (int16_t)(q->d[i] * g); } }
     int vi = -1; for (int i = AMB_VOICES; i < NVOICE; i++) if (!g_vo[i].on) { vi = i; break; }
     if (vi < 0) return;
-    Voice *V = &g_vo[vi]; V->d = g_xf_d[k]; V->n = g_xf_n[k]; V->pos = 0.0; V->step = g_snd[S_SWITCH][k].step; V->vl = vol; V->vr = vol; V->loop = 0; V->cd = NULL; V->cat = 0; __sync_synchronize(); V->on = 1;
+    Voice *V = &g_vo[vi]; V->d = g_xf_d[k]; V->n = g_xf_n[k]; V->pos = 0.0; V->step = g_snd[S_SWITCH][k].step; V->vl = vol; V->vr = vol; V->loop = 0; V->cd = NULL; V->cat = 0; V->lp = 1.0f; V->lz = 0.0f; V->lz2 = V->lz3 = 0.0f; V->rv = 1.0f; V->dly = 0; V->pri = 0; V->pk = vol * 2.0f; __sync_synchronize(); V->on = 1;
 }
 static void snd_stop_dlg(void) {      // dlg_mute: silence every spoken dialogue line still playing (Eileen's and Gehrman's), so a skipped line doesn't talk over the next one
-    for (int s = S_E_OH; s <= S_GH_7; s++) for (int v = 0; v < g_snd_nv[s] && v < SND_VAR; v++) { const int16_t *d = g_snd[s][v].d; if (!d) continue; for (int q = AMB_VOICES; q < NVOICE; q++) if (g_vo[q].on && g_vo[q].d == d) g_vo[q].on = 0; }
+    for (int s = S_E_OH; s <= S_DL_16; s++) for (int v = 0; v < g_snd_nv[s] && v < SND_VAR; v++) { const int16_t *d = g_snd[s][v].d; if (!d) continue; for (int q = AMB_VOICES; q < NVOICE; q++) if (g_vo[q].on && g_vo[q].d == d) g_vo[q].on = 0; }
 }
 static void snd_play(int slot, float vol) { snd_play_lr(slot, vol, vol, 0.95f + frand() * 0.1f); }
 static int wsl(int s, int open) {          // the player's weapon sound: the weapon's own clips (assets/Audio/Gameplay/WeaponSpecific) when it has them, else the shared slot
@@ -9686,7 +10029,54 @@ static void snd_play_at_p(int slot, float x, float y, float vol, float pitch) {
     float dx = x - g_plx, dy = y - g_ply, d = sqrtf(dx * dx + dy * dy); if (d > 45.0f) return;
     float att = 1.0f / (1.0f + d * d * 0.03f), hl = sqrtf(g_camfx * g_camfx + g_camfy * g_camfy), rx = hl > 1e-4f ? g_camfy / hl : 1.0f, ry = hl > 1e-4f ? -g_camfx / hl : 0.0f;
     float pan = d > 0.5f ? (dx * rx + dy * ry) / d : 0.0f, v = vol * att;
-    snd_play_lr(slot, v * (pan > 0.0f ? 1.0f - pan * 0.7f : 1.0f), v * (pan < 0.0f ? 1.0f + pan * 0.7f : 1.0f), pitch);
+    if (!g_audio_fx) { snd_play_lr(slot, v * (pan > 0.0f ? 1.0f - pan * 0.7f : 1.0f), v * (pan < 0.0f ? 1.0f + pan * 0.7f : 1.0f), pitch); return; }
+    float lp_ = 1.0f;
+    if (d > 12.0f) { lp_ = 1.0f - (d - 12.0f) * (0.6f / 30.0f); if (lp_ < 0.4f) lp_ = 0.4f; }      /* far away: the top end goes first */
+    if (d > 2.5f) {      /* behind a wall: dull and quieter (a ray from your head to the source, at head height) */
+        float o_[3] = { g_plx, g_ply, g_plz + 1.5f }, dr_[3] = { dx / d, dy / d, 0.0f }, th_;
+        if (cw_raycast(&world, o_, dr_, d - 0.6f, &th_)) { lp_ *= 0.16f; v *= 0.7f; }
+    }
+    if (pan > 1.0f) pan = 1.0f; if (pan < -1.0f) pan = -1.0f;
+    float gl_ = cosf((pan + 1.0f) * 0.7853982f) * 1.4142136f, gr_ = sinf((pan + 1.0f) * 0.7853982f) * 1.4142136f;      /* even level across the field; a sound hard to one side still leaks a little into the other ear */
+    if (gl_ > 1.15f) gl_ = 1.15f; if (gr_ > 1.15f) gr_ = 1.15f; if (gl_ < 0.2f) gl_ = 0.2f; if (gr_ < 0.2f) gr_ = 0.2f;
+    /* boss_voices: the Amygdala and the Moon Presence borrow the Cleric Beast's cries; each gets its own voice by pitch and by a second, later layer. Amygdala: higher and chittering over a deep undertone. Moon Presence: slow and low, with a thin high echo of itself a moment after */
+    int cbs_ = (slot == S_CB_ROAR || slot == S_CB_HOWL || slot == S_CB_HURT || slot == S_CB_DEATH), bossv_ = cbs_ || slot == S_CB_SWING || slot == S_CB_IMPACT || slot == S_CB_STEP;
+    if (bossv_ && rl_map()) {      /* Rom: thin, high and quiet, with a higher glassy ring after it */
+        g_nx_lp = lp_; snd_play_lr(slot, v * gl_ * 0.7f, v * gr_ * 0.7f, pitch * 1.55f);
+        if (cbs_) { g_nx_lp = lp_; g_nx_dly = (int)(SND_RATE * 0.12f); g_nx_rv = 1.6f; snd_play_lr(slot, v * gl_ * 0.3f, v * gr_ * 0.3f, pitch * 2.3f); }
+        return;
+    }
+    if (bossv_ && moon_map()) {
+        float p_ = pitch * (cbs_ ? 0.7f : 0.82f);
+        g_nx_lp = lp_; g_nx_pri = cbs_; snd_play_lr(slot, v * gl_, v * gr_, p_);
+        if (cbs_) { g_nx_lp = lp_; g_nx_dly = (int)(SND_RATE * 0.21f); g_nx_rv = 1.6f; snd_play_lr(slot, v * gl_ * 0.4f, v * gr_ * 0.4f, p_ * 1.5f); }
+        return;
+    }
+    if (bossv_ && rom_map()) {
+        float p_ = pitch * (cbs_ ? 1.24f : 1.1f);
+        g_nx_lp = lp_; g_nx_pri = cbs_; snd_play_lr(slot, v * gl_, v * gr_, p_);
+        if (cbs_) { g_nx_lp = lp_ * 0.5f; g_nx_dly = (int)(SND_RATE * 0.06f); snd_play_lr(slot, v * gl_ * 0.55f, v * gr_ * 0.55f, p_ * 0.5f); }
+        return;
+    }
+    g_nx_lp = lp_; snd_play_lr(slot, v * gl_, v * gr_, pitch);
+}
+/* snd_place_update: what the echo should be where you stand. Three rays go up from your head (straight, and tilted two ways); roofs they find mean indoors, and the higher the roof the longer the ring. Open sky: a short, faint slap. The chapel and the lake arenas ring longest. Checked four times a second and eased in, so walking through a door changes the sound smoothly */
+static void snd_place_update(float dt, float px, float py, float pz) {
+    static float t_ = 0.0f, wet_ = 0.06f, fb_ = 0.72f, tw_ = 0.06f, tf_ = 0.72f, td_ = 0.35f, dm_ = 0.35f;
+    t_ -= dt;
+    if (t_ <= 0.0f) {
+        t_ = 0.25f; int hits_ = 0; float hs_ = 0.0f, o_[3] = { px, py, pz + 1.5f }; static const float D_[3][3] = { { 0.0f, 0.0f, 1.0f }, { 0.45f, 0.2f, 0.87f }, { -0.3f, -0.4f, 0.866f } };
+        for (int k = 0; k < 3; k++) { float th_; if (cw_raycast(&world, o_, D_[k], 30.0f, &th_)) { hits_++; hs_ += th_; } }
+        if (hits_ >= 2) { float h_ = hs_ / hits_; if (h_ > 16.0f) h_ = 16.0f; tw_ = 0.2f + 0.008f * h_; tf_ = 0.76f + 0.0075f * h_; td_ = 0.3f; }      /* indoors */
+        else if (hits_ == 1) { tw_ = 0.12f; tf_ = 0.76f; td_ = 0.35f; }      /* a doorway, an arch */
+        else { tw_ = 0.05f; tf_ = 0.7f; td_ = 0.45f; }      /* open air */
+        if (!strcasecmp(cur_map, "oedonchapel")) { tw_ += 0.08f; tf_ += 0.02f; }
+        if (rom_map()) { if (tw_ < 0.16f) tw_ = 0.16f; if (tf_ < 0.86f) tf_ = 0.86f; td_ = 0.25f; }      /* the lake: wide, open and cold: a long thin tail */
+        if (tf_ > 0.9f) tf_ = 0.9f; if (tw_ > 0.4f) tw_ = 0.4f;
+    }
+    float k_ = dt * 1.5f; if (k_ > 1.0f) k_ = 1.0f;
+    wet_ += (tw_ - wet_) * k_; fb_ += (tf_ - fb_) * k_; dm_ += (td_ - dm_) * k_;
+    g_rv_wet = wet_; g_rv_fb = fb_; g_rv_damp = dm_;
 }
 static void rally_ping_v(float amt, float vol) { if (amt > 1.5f && g_rally_cd <= 0.0f) { snd_play(S_RECOVER, vol); g_rally_cd = 0.4f; } }
 static void rally_ping(float amt) { rally_ping_v(amt, 0.8f); }       // health won back by hitting
@@ -9780,6 +10170,63 @@ static void blood_visc(const Enemy *e, float fromx, float fromy) {
     for (int k = 0; k < 8; k++) { float a = frand() * 6.2832f, r = 0.2f + frand() * 1.1f; blood_splat(e->p.x + cosf(a) * r, e->p.y + sinf(a) * r, e->p.z, 0.45f + frand() * 0.55f); }
     snd_play_at(S_VISC, e->p.x, e->p.y, 1.0f);
     g_gush_idx = (int)(e - ENS); g_gush_t = 1.3f; g_shake = 1.0f; g_vshake = 1;
+}
+/* amyg_blood: the Amygdala's own visceral blood: patches stuck to triangles of his model (they move with his animation), growing at random through the fight; cleared when the fight is reset (you die) */
+typedef struct { uint16_t v[3]; float b0, b1, size, rot, age; } AStain;
+#define AST_MAX 90
+static AStain g_ast[AST_MAX]; static int g_ast_n, g_ast_want, g_ast_nv; static float g_ast_h; static GLuint astTex;
+#define AMG_BLOOD 0      /* amyg_blood: 1 = the added blood on the Amygdala (patches, back sprays, stump drips); 0 = off (asked for: it looked out of place) */
+static void ast_reset(void) { g_ast_n = 0; g_ast_want = 0; g_ast_nv = 0; }
+static void ast_place(AStain *q) {      /* ECUR is the boss, CUR its model */
+    for (int tries = 0; tries < 80; tries++) {
+        uint32_t si = (uint32_t)(frand() * H.nS); if (si >= H.nS) si = H.nS - 1;
+        if (H.sec[si].flag != 0 || H.sec[si].count < 3) continue;
+        uint32_t nt = H.sec[si].count / 3, ti = (uint32_t)(frand() * nt); if (ti >= nt) ti = nt - 1;
+        const uint16_t *ix = H.idx + H.sec[si].start + ti * 3;
+        q->v[0] = ix[0]; q->v[1] = ix[1]; q->v[2] = ix[2]; q->b0 = frand() * 0.7f; q->b1 = frand() * (1.0f - q->b0);
+        q->size = g_ast_h * (0.035f + frand() * 0.06f); q->rot = frand() * 6.2832f; q->age = 0.0f; return;
+    }
+    q->v[0] = q->v[1] = q->v[2] = 0; q->size = 0.0f;
+}
+static void ast_draw(const PS1Shader *sh, const float *pv, float x, float y, float z, float face, float cut) {
+    if (!H.skinned || !H.nS) return;
+    if (g_ast_nv != (int)H.nV) {      /* a new model (the arms came off): measure it and put the same number of patches on it again */
+        float zlo_ = 1e9f, zhi_ = -1e9f; for (uint32_t i = 0; i < H.nV; i++) { float zz = H.skinned[i * 5 + 2]; if (zz < zlo_) zlo_ = zz; if (zz > zhi_) zhi_ = zz; }
+        g_ast_h = zhi_ - zlo_; if (g_ast_h < 0.5f || g_ast_h > 40.0f) g_ast_h = 3.0f; g_ast_nv = (int)H.nV; for (int i = 0; i < g_ast_n; i++) ast_place(&g_ast[i]);
+    }
+    while (g_ast_want > 0) { g_ast_want--; if (g_ast_n < AST_MAX) ast_place(&g_ast[g_ast_n++]); else ast_place(&g_ast[(int)(frand() * AST_MAX) % AST_MAX]); }
+    if (!g_ast_n) return;
+    if (!astTex) { uint8_t d[16 * 16 * 4]; memset(d, 0, sizeof d); uint32_t sv_ = rng_state; rng_state = 4711u;
+        for (int yy = 0; yy < 16; yy++) for (int xx = 0; xx < 16; xx++) { float dx = xx - 7.5f, dy = yy - 7.5f, r = sqrtf(dx * dx + dy * dy); if (r < 6.5f + (frand() - 0.5f) * 3.0f) { uint8_t *p = d + (yy * 16 + xx) * 4; p[0] = 92; p[1] = 2; p[2] = 4; p[3] = 255; } }
+        rng_state = sv_; glGenTextures(1, &astTex); tex_upload(astTex, 16, 16, d); }
+    static float vb[AST_MAX * 6 * 5]; int nv = 0;
+    for (int i = 0; i < g_ast_n; i++) {
+        AStain *q = &g_ast[i]; if (q->size <= 0.0f) continue; q->age += 0.016f;
+        const float *P0 = H.skinned + q->v[0] * 5, *P1 = H.skinned + q->v[1] * 5, *P2 = H.skinned + q->v[2] * 5;
+        float b2 = 1.0f - q->b0 - q->b1, px = P0[0] * q->b0 + P1[0] * q->b1 + P2[0] * b2, py = P0[1] * q->b0 + P1[1] * q->b1 + P2[1] * b2, pz = P0[2] * q->b0 + P1[2] * q->b1 + P2[2] * b2;
+        float ux = P1[0] - P0[0], uy = P1[1] - P0[1], uz = P1[2] - P0[2], vx = P2[0] - P0[0], vy = P2[1] - P0[1], vz = P2[2] - P0[2];
+        float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, nl = sqrtf(nx * nx + ny * ny + nz * nz), ul = sqrtf(ux * ux + uy * uy + uz * uz);
+        if (nl < 1e-9f || ul < 1e-9f) continue;
+        nx /= nl; ny /= nl; nz /= nl; ux /= ul; uy /= ul; uz /= ul;
+        if (px * nx + py * ny < 0.0f) { nx = -nx; ny = -ny; nz = -nz; }
+        float off = g_ast_h * 0.004f; px += nx * off; py += ny * off; pz += nz * off;
+        float wx = ny * uz - nz * uy, wy = nz * ux - nx * uz, wz = nx * uy - ny * ux, c_ = cosf(q->rot), s_ = sinf(q->rot);
+        float ax = ux * c_ + wx * s_, ay = uy * c_ + wy * s_, az = uz * c_ + wz * s_, bx = -ux * s_ + wx * c_, by = -uy * s_ + wy * c_, bz = -uz * s_ + wz * c_;
+        float sz = q->size * (q->age < 0.4f ? 0.4f + q->age * 1.5f : 1.0f);
+        float C[4][5] = { { px - ax * sz - bx * sz, py - ay * sz - by * sz, pz - az * sz - bz * sz, 0, 0 }, { px + ax * sz - bx * sz, py + ay * sz - by * sz, pz + az * sz - bz * sz, 1, 0 },
+                          { px + ax * sz + bx * sz, py + ay * sz + by * sz, pz + az * sz + bz * sz, 1, 1 }, { px - ax * sz + bx * sz, py - ay * sz + by * sz, pz - az * sz + bz * sz, 0, 1 } };
+        static const int T[6] = { 0, 1, 2, 0, 2, 3 };
+        for (int t = 0; t < 6; t++) memcpy(vb + (nv++) * 5, C[T[t]], 5 * sizeof(float));
+    }
+    if (!nv) return;
+    float c = cosf(face), sn = sinf(face), model[16] = { c, sn, 0, 0, -sn, c, 0, 0, 0, 0, 1, 0, x, y, z, 1 }, wvp[16];
+    mat_mul(wvp, pv, model); glUniformMatrix4fv(sh->wvp, 1, GL_FALSE, wvp); glUniform2f(sh->uvOffset, 0.0f, 0.0f); glUniform1f(sh->affineAmt, 0.0f); glUniform1f(sh->alphaCut, 0.33f);
+    glBindBuffer(GL_ARRAY_BUFFER, 0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, vb); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (const char *)vb + 12);
+    glBindTexture(GL_TEXTURE_2D, astTex);
+    glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(0.0f, -6.0f);
+    glDrawArrays(GL_TRIANGLES, 0, nv);
+    glDisable(GL_POLYGON_OFFSET_FILL); glUniform1f(sh->alphaCut, cut);
 }
 static void blood_gush_update(float dt) {
     if (g_vshake) {                                                  // the screen keeps shaking until all of the visceral's blood has landed
@@ -9932,18 +10379,20 @@ static void fire_tex_init(void) {
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); }
 }
 // ---- light_glow: a soft, flickering warm halo round every fire, lit lantern and torch (additive billboards, hidden behind walls)
-typedef struct { float x, y, z, r, life; int b; } Glow;      // b: 1 = a cool blue halo (lanterns)
+typedef struct { float x, y, z, r, life; int b, w; } Glow;      // b: 1 = a cool blue halo (lanterns)
 #define GLOW_MAX 40
-static Glow g_gl[GLOW_MAX]; static GLuint glowTex, glowTexB, glowTexC, glowTexD, glowTexW, soulTex, soulTexR, glowTexR, wEmberTex; static float g_glow_t;      // glow_v2: halo (warm / blue) + a small hot core (warm / blue)
+static Glow g_gl[GLOW_MAX]; static GLuint glowTex, glowTexB, glowTexC, glowTexD, glowTexW, soulTex, soulTexR, glowTexR, glowTexP, wEmberTex; static float g_glow_t;      // glow_v2: halo (warm / blue) + a small hot core (warm / blue)
+static int g_glow_w;      /* glow_on_weapon: set while a glow that rides on a held weapon is being added: it is drawn exactly on the weapon, not pulled toward the camera */
 static void glow_add_c(float x, float y, float z, float r, int blue) {      // refreshed every frame by its source; dies 0.15 s after the source stops
     int free_ = -1;
     for (int i = 0; i < GLOW_MAX; i++) {
-        if (g_gl[i].life > 0.0f && fabsf(g_gl[i].x - x) < 0.6f && fabsf(g_gl[i].y - y) < 0.6f && fabsf(g_gl[i].z - z) < 0.8f) { g_gl[i].x = x; g_gl[i].y = y; g_gl[i].z = z; g_gl[i].r = r; g_gl[i].life = 0.15f; g_gl[i].b = blue; return; }
+        if (g_gl[i].life > 0.0f && fabsf(g_gl[i].x - x) < 0.6f && fabsf(g_gl[i].y - y) < 0.6f && fabsf(g_gl[i].z - z) < 0.8f) { g_gl[i].x = x; g_gl[i].y = y; g_gl[i].z = z; g_gl[i].r = r; g_gl[i].life = 0.15f; g_gl[i].b = blue; g_gl[i].w = g_glow_w; return; }
         if (free_ < 0 && g_gl[i].life <= 0.0f) free_ = i;
     }
-    if (free_ >= 0) { g_gl[free_].x = x; g_gl[free_].y = y; g_gl[free_].z = z; g_gl[free_].r = r; g_gl[free_].life = 0.15f; g_gl[free_].b = blue; }
+    if (free_ >= 0) { g_gl[free_].x = x; g_gl[free_].y = y; g_gl[free_].z = z; g_gl[free_].r = r; g_gl[free_].life = 0.15f; g_gl[free_].b = blue; g_gl[free_].w = g_glow_w; }
 }
 static void glow_add(float x, float y, float z, float r) { glow_add_c(x, y, z, r, 0); }
+static void glow_add_w(float x, float y, float z, float r, int blue) { g_glow_w = 1; glow_add_c(x, y, z, r, blue); g_glow_w = 0; }
 #define LPAN_MAX 24
 static float g_lpan[LPAN_MAX][7]; static int g_nlpan;      // lamp_panel: untextured flat 5 m quads (the lantern glow planes whose texture was never exported) - not drawn, they become a blue glow instead
 static void glow_tex_init(void) {      // glow_v2: 64 px (the old 32 px one banded), a smooth light-like falloff, a colour that runs from deep orange at the edge to pale yellow near the middle, and a second tighter texture for a hot core
@@ -9984,6 +10433,9 @@ static void soul_tex_init(void) {      // item_soul: a small white flame hanging
     { enum { GS_ = 64 }; static uint8_t gx[GS_ * GS_ * 4]; for (int y = 0; y < GS_; y++) for (int x = 0; x < GS_; x++) { float dx = (x - (GS_ - 1) * 0.5f) / ((GS_ - 1) * 0.5f), dy = (y - (GS_ - 1) * 0.5f) / ((GS_ - 1) * 0.5f), d = sqrtf(dx * dx + dy * dy), a = d < 1.0f ? (1.0f - d) * (1.0f - d) * (0.55f + 0.45f * (1.0f - d)) : 0.0f, g_ = a * 0.55f; uint8_t *q = gx + (y * GS_ + x) * 4; q[0] = (uint8_t)(255.0f * g_); q[1] = (uint8_t)(36.0f * g_); q[2] = (uint8_t)(24.0f * g_); q[3] = 255; }
       glGenTextures(1, &glowTexR); glBindTexture(GL_TEXTURE_2D, glowTexR); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, GS_, GS_, 0, GL_RGBA, GL_UNSIGNED_BYTE, gx);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); }      // echo_glow: a soft red halo
+    { enum { GS_ = 64 }; static uint8_t gx[GS_ * GS_ * 4]; for (int y = 0; y < GS_; y++) for (int x = 0; x < GS_; x++) { float dx = (x - (GS_ - 1) * 0.5f) / ((GS_ - 1) * 0.5f), dy = (y - (GS_ - 1) * 0.5f) / ((GS_ - 1) * 0.5f), d = sqrtf(dx * dx + dy * dy), a = d < 1.0f ? (1.0f - d) * (1.0f - d) * (0.55f + 0.45f * (1.0f - d)) : 0.0f, g_ = a * 0.7f; uint8_t *q = gx + (y * GS_ + x) * 4; q[0] = (uint8_t)(170.0f * g_); q[1] = (uint8_t)(40.0f * g_); q[2] = (uint8_t)(255.0f * g_); q[3] = 255; }
+      glGenTextures(1, &glowTexP); glBindTexture(GL_TEXTURE_2D, glowTexP); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, GS_, GS_, 0, GL_RGBA, GL_UNSIGNED_BYTE, gx);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); }      /* rat_glow: a small purple halo (glow type 3) */
     static uint8_t ep[8 * 8 * 4];
     for (int y = 0; y < 8; y++) for (int x = 0; x < 8; x++) { float dx = (x - 3.5f) / 3.5f, dy = (y - 3.5f) / 3.5f, d = sqrtf(dx * dx + dy * dy), a = d < 1.0f ? (1.0f - d) : 0.0f; uint8_t *q = ep + (y * 8 + x) * 4; q[0] = q[1] = q[2] = 255; q[3] = (uint8_t)(a * 255.0f); }
     glGenTextures(1, &wEmberTex); glBindTexture(GL_TEXTURE_2D, wEmberTex); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 8, 8, 0, GL_RGBA, GL_UNSIGNED_BYTE, ep);
@@ -10146,7 +10598,7 @@ static int lit_build(PS1Shader *s, GLint *u, const char *vsrc, const char *fsrc)
     for (int i = 0; i < 9; i++) u[i] = glGetUniformLocation(s->prog, N[i]);
     return 1;
 }
-static float g_Lp[4][4], g_Lc[4][3], g_lit_amb = 0.4f, g_lit_int = 0.9f; static int g_lit_user = 1, g_lit_okv = 0;      // g_lit_user: the LIGHTING row in the pause menu (light.txt); g_lit_okv: the lit programs compiled
+static float g_Lp[4][4], g_Lc[4][3], g_lit_amb = 0.7f, g_lit_int = 0.9f; static int g_lit_user = 1, g_lit_okv = 0;      // g_lit_user: the LIGHTING row in the pause menu (light.txt); g_lit_okv: the lit programs compiled
 static int lit_gather_raw(float ex, float ey, float ez) {      // the 4 glows that matter most to this view become lights; returns how many
     int idx[4] = { -1, -1, -1, -1 }; float sc[4] = { 1e9f, 1e9f, 1e9f, 1e9f }; int n = 0;
     for (int i = 0; i < GLOW_MAX; i++) {
@@ -10202,11 +10654,11 @@ static void fire_draw(const PS1Shader *sh, const float *pv, float fx, float fy) 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
     GLboolean bl_ = glIsEnabled(GL_BLEND); glEnable(GL_BLEND);      // glow_blend: the world is drawn with blending off, so the halo needs it switched on or its black rim paints a square
     glBlendFunc(GL_ONE, GL_ONE); glDepthMask(GL_FALSE); glUniform1f(sh->alphaCut, -1.0f); glUniform4f(sh->fogColor, 0.0f, 0.0f, 0.0f, 0.0f);      // glow_fix: additive, no cut-out, fog fades it to nothing
-    for (int gp_ = 0; gp_ < 3; gp_++) {      // light_glow: 0 warm orange (fires), 1 cool blue (lanterns), 2 faint white (item souls)
+    for (int gp_ = 0; gp_ < 4; gp_++) {      // light_glow: 3 purple (the blood moon rats), 0 warm orange (fires), 1 cool blue (lanterns), 2 faint white (item souls)
     for (int i = 0; i < GLOW_MAX; i++) { const Glow *g = &g_gl[i]; if (g->life <= 0.0f || g->b != gp_) continue;
         float ph_ = g->x * 3.1f + g->y * 5.3f, fl = 1.0f + 0.09f * sinf(g_glow_t * 11.0f + ph_) + 0.06f * sinf(g_glow_t * 23.0f + ph_ * 1.7f) + 0.04f * sinf(g_glow_t * 4.3f + ph_ * 0.6f), fadein = g->life > 0.12f ? 1.0f : g->life / 0.12f, sz = g->r * fl * (0.6f + 0.4f * fadein);
-        float hl_ = sqrtf(fx * fx + fy * fy), ox_ = hl_ > 1e-4f ? -fx / hl_ : 0.0f, oy_ = hl_ > 1e-4f ? -fy / hl_ : 0.0f, off_ = fminf(sz * 0.3f, 0.5f);      // glow_pull: drawn a little toward the camera so a wall next to the light does not slice the halo into a hard-edged shape
-        glBindTexture(GL_TEXTURE_2D, gp_ == 2 ? glowTexW : (gp_ ? glowTexB : glowTex));
+        float hl_ = sqrtf(fx * fx + fy * fy), ox_ = hl_ > 1e-4f ? -fx / hl_ : 0.0f, oy_ = hl_ > 1e-4f ? -fy / hl_ : 0.0f, off_ = g->w ? 0.0f : fminf(sz * 0.3f, 0.5f);      // glow_pull: drawn a little toward the camera so a wall next to the light does not slice the halo into a hard-edged shape
+        glBindTexture(GL_TEXTURE_2D, gp_ == 3 ? glowTexP : (gp_ == 2 ? glowTexW : (gp_ ? glowTexB : glowTex)));
         lamp_matrix(m, g->x + ox_ * off_, g->y + oy_ * off_, g->z, sz * 2.0f, sz * 2.0f, fx, fy); mat_mul(wvp, pv, m); glUniformMatrix4fv(sh->wvp, 1, GL_FALSE, wvp); glDrawArrays(GL_TRIANGLES, 0, 6);
         if (g->r >= 0.8f && gp_ < 2) { float cs_ = sz * 0.75f * (0.92f + 0.08f * fl); glBindTexture(GL_TEXTURE_2D, gp_ ? glowTexD : glowTexC); lamp_matrix(m, g->x + ox_ * off_, g->y + oy_ * off_, g->z, cs_ * 2.0f, cs_ * 2.0f, fx, fy); mat_mul(wvp, pv, m); glUniformMatrix4fv(sh->wvp, 1, GL_FALSE, wvp); glDrawArrays(GL_TRIANGLES, 0, 6); }      // the hot core
     }
@@ -10315,7 +10767,7 @@ static void spark_char_emit(Char *c, int sec, float x, float y, float z, float f
         float bx_ = m[0], by_ = m[1], bz_ = m[2], bd_ = -1.0f;
         if (sec >= 0 && (uint32_t)sec < c->nS) { const HSection *S_ = &c->sec[sec]; for (uint32_t k = 0; k < S_->count; k += 2) { uint32_t v_ = c->idx[S_->start + k]; float dx = c->skinned[v_ * 5] - m[0], dy = c->skinned[v_ * 5 + 1] - m[1], dz = c->skinned[v_ * 5 + 2] - m[2], dd = dx * dx + dy * dy + dz * dz; if (dd > bd_) { bd_ = dd; bx_ = c->skinned[v_ * 5]; by_ = c->skinned[v_ * 5 + 1]; bz_ = c->skinned[v_ * 5 + 2]; } } }
         float gx_ = m[0] + (bx_ - m[0]) * fr_, gy_ = (m[1] + (by_ - m[1]) * fr_) * ((c == &HUNT && g_lefty) ? -1.0f : 1.0f), gz_ = m[2] + (bz_ - m[2]) * fr_;
-        glow_add_c(x + cs * gx_ - sn * gy_, y + sn * gx_ + cs * gy_, z + gz_ + 0.05f, 1.2f + 0.35f * frand(), 1);
+        glow_add_w(x + cs * gx_ - sn * gy_, y + sn * gx_ + cs * gy_, z + gz_, 1.2f + 0.35f * frand(), 1);
     }
     for (int i = 0; i < 2; i++) if (frand() < 60.0f * g_fire_dt * 0.5f) spark_spawn(x + cs * m[0] - sn * m1_, y + sn * m[0] + cs * m1_, z + m[2], 0.22f);
 }
@@ -10327,7 +10779,7 @@ static void fire_char_emit(Char *c, int sec, int which, float x, float y, float 
     if (*tv < 0) return;
     float mm_[3] = { c->skinned[(*tv - 1) * 5], c->skinned[(*tv - 1) * 5 + 1] * ((c == &HUNT && g_lefty) ? -1.0f : 1.0f), c->skinned[(*tv - 1) * 5 + 2] };      // left_hand: mirrored side
     const float *m = mm_, cs = cosf(face), sn = sinf(face);
-    glow_add(x + cs * m[0] - sn * m[1], y + sn * m[0] + cs * m[1], z + m[2] + 0.2f, g_fce_axe ? 0.9f : 1.7f);      // torches
+    glow_add_w(x + cs * m[0] - sn * m[1], y + sn * m[0] + cs * m[1], z + m[2] + 0.2f, g_fce_axe ? 0.9f : 1.7f, 0);      // torches
     if (g_fce_axe) { for (int k = 0; k < 2; k++) fire_spawn_short(x + cs * m[0] - sn * m[1], y + sn * m[0] + cs * m[1], z + m[2], 0.22f); if (frand() < 0.12f) ember_spawn(x + cs * m[0] - sn * m[1], y + sn * m[0] + cs * m[1], z + m[2], 0.2f); return; }      // gh_axefire: no trail, embers back
     { float ex_ = x + cs * m[0] - sn * m[1], ey_ = y + sn * m[0] + cs * m[1], ez_ = z + m[2];      // torch_trail: shorter flames, more embers
       if (frand() < 20.0f * g_fire_dt) { g_fire_life = 0.5f; fire_spawn(ex_, ey_, ez_, 0.30f); g_fire_life = 1.0f; }
@@ -10349,8 +10801,8 @@ static void paper_both(const Char *c, float x, float y, float z, float face, int
             if (frand() < rt_ * g_fire_dt) {
                 float u = -0.8f + 1.8f * frand(), mx = cen[0] + (far_[0] - cen[0]) * u, my = (cen[1] + (far_[1] - cen[1]) * u) * ys, mz = cen[2] + (far_[2] - cen[2]) * u;
                 float px_ = x + cs * mx - sn * my, py_ = y + sn * mx + cs * my, pz_ = z + mz;
-                if (kind == 1) { fire_spawn_short(px_, py_, pz_, 0.22f); if (frand() < 0.4f) ember_spawn(px_, py_, pz_, 0.12f); if (sw_) glow_add(px_, py_, pz_, 1.2f); }
-                else { spark_spawn(px_, py_, pz_, 0.2f); if (sw_) glow_add_c(px_, py_, pz_, 1.2f, 1); }
+                if (kind == 1) { fire_spawn_short(px_, py_, pz_, 0.22f); if (frand() < 0.4f) ember_spawn(px_, py_, pz_, 0.12f); if (sw_) glow_add_w(px_, py_, pz_, 1.2f, 0); }
+                else { spark_spawn(px_, py_, pz_, 0.2f); if (sw_) glow_add_w(px_, py_, pz_, 1.2f, 1); }
             }
         }
     }
@@ -10376,6 +10828,13 @@ static void char_blade(const Char *c, float x, float y, float z, float face, flo
         if (c == &HUNT && g_lefty) my = -my;      // left_hand: the blade (hits, blood) is on the mirrored side too
         o[0] = x + cs * mx - sn * my; o[1] = y + sn * mx + cs * my; o[2] = z + mz;
     }
+}
+static void char_pt(const Char *c, float x, float y, float z, float face, const float *q, float *o) {      /* a point fixed in the weapon (given in the rest pose) carried by the hand: where the Moonlight Sword's own blade really is */
+    if (c->wbone < 0) { o[0] = x; o[1] = y; o[2] = z + 1.0f; return; }
+    const float *m = c->pose + (size_t)(c->wset && c->hand >= 0 ? c->hand : c->wbone) * 12; float cs = cosf(face), sn = sinf(face);
+    float mx = m[0]*q[0] + m[1]*q[1] + m[2]*q[2] + m[3], my = m[4]*q[0] + m[5]*q[1] + m[6]*q[2] + m[7], mz = m[8]*q[0] + m[9]*q[1] + m[10]*q[2] + m[11];
+    if (c == &HUNT && g_lefty) my = -my;
+    o[0] = x + cs * mx - sn * my; o[1] = y + sn * mx + cs * my; o[2] = z + mz;
 }
 #define VDOT(u,v) ((u)[0]*(v)[0] + (u)[1]*(v)[1] + (u)[2]*(v)[2])
 // squared distance between segments p1-q1 and p2-q2
@@ -10519,7 +10978,7 @@ static void enemy_init_anims(int type) {                  // call with CUR == &E
         for (int i = 0; i < 2; i++) if (ht[k][i]) { int a = hunter_anim_pick(ht[k][i], NULL); if (a >= 0) EN.a_hurt[EN.n_hurt++] = a; }
         EN.a_death = k == 4 ? hunter_anim_pick("Dead", NULL) : hunter_anim_pick("Death", NULL); if (EN.a_death < 0) EN.a_death = hunter_anim_has("dead"); if (EN.a_death < 0) EN.a_death = hunter_anim_has("death");
         EN.walk_v = anim_speed(&ENEMY, EN.a_walk, k == 3 ? 1.6f : 2.0f); EN.run_v = anim_speed(&ENEMY, EN.a_run, k <= 2 ? 6.0f : (k == 3 ? 6.5f : (k == 4 ? 5.5f : 1.8f)));
-        if (k <= 2)      { EN.hp_max = 95.0f;  EN.aggro = 14.0f; EN.reach = 1.9f; EN.dmg = 18.0f; EN.cz = 0.7f; EN.bod = 0.7f; EN.hrad = 0.5f; EN.zlo = 0.0f; EN.zhi = 1.3f; EN.stop = 1.0f; EN.atk_rate = 1.4f; EN.cfg_always_run = 1; }
+        if (k <= 2)      { EN.hp_max = (k == 1 && g_spd_have && rl_map()) ? 55.0f : 95.0f;  /* a child of Rom: fewer hits to the side or back */ EN.aggro = 14.0f; EN.reach = 1.9f; EN.dmg = 18.0f; EN.cz = 0.7f; EN.bod = 0.7f; EN.hrad = 0.5f; EN.zlo = 0.0f; EN.zhi = 1.3f; EN.stop = 1.0f; EN.atk_rate = 1.4f; EN.cfg_always_run = 1; }
         else if (k == 3) { EN.hp_max = 420.0f; EN.aggro = 16.0f; EN.reach = 3.0f; EN.dmg = 44.0f; EN.cz = 1.4f; EN.bod = 1.3f; EN.hrad = 1.1f; EN.zlo = 0.0f; EN.zhi = 2.6f; EN.stop = 2.4f; EN.atk_rate = 1.0f; EN.cfg_always_run = 1; }
         else if (k == 4) { EN.hp_max = 260.0f; EN.aggro = 16.0f; EN.reach = 2.6f; EN.dmg = 36.0f; EN.cz = 1.4f; EN.bod = 1.0f; EN.hrad = 0.8f; EN.zlo = 0.0f; EN.zhi = 2.6f; EN.stop = 1.8f; EN.atk_rate = 1.2f; EN.cfg_always_run = 1; }
         else             { EN.hp_max = 70.0f;  EN.aggro = 20.0f; EN.reach = 16.0f; EN.dmg = 20.0f; EN.cz = 0.8f; EN.bod = 0.7f; EN.hrad = 0.5f; EN.zlo = 0.0f; EN.zhi = 1.5f; EN.stop = 7.0f; EN.atk_rate = 0.8f; EN.cfg_always_run = 0; }
@@ -10633,14 +11092,23 @@ static void enemy_stagger(void) {
 #define NIGHT2_HP 1.6f      /* night_two: after Gascoigne the ordinary enemies take 60% more to kill... */
 #define NIGHT2_DMG 1.4f     /* ...hit 40% harder... */
 #define NIGHT2_ECHO 2.5f    /* ...and drop 2.5x the blood echoes */
-static int night2_on(void) { return g_gas_dead && EN.type != 4 && !EN_NPC(EN.type); }
+static int night2_on(void) { return gas_night() && EN.type != 4 && !EN_NPC(EN.type); }
+/* hard_tier: the blood moon (Rom dead) is tier 1; once Gehrman has fallen in a blood moon it is tier 2 (the last hour). Every new game plus starts at tier 1 and keeps it, and each cycle makes the same tiers bite harder (cycle factor, 8 cycles at most) */
+static int hard_tier(void) { if (g_rush) return 0; int t = ((g_story & 4) || g_ng > 0) ? 1 : 0; if (t && (g_story & 4) && g_gh_dead && !g_gh_redo) t = 2; return t; }
+static float hard_cyc(void) { return 1.0f + 0.25f * (float)(g_ng > 8 ? 8 : g_ng); }
+static int hard_on(void) { return hard_tier() > 0 && EN.type != 4 && !EN_NPC(EN.type); }
+static float tier_hp(void) { return 1.0f + 0.12f * (float)hard_tier() * hard_cyc(); }
+static float tier_dm(void) { return 1.0f + 0.08f * (float)hard_tier() * hard_cyc(); }
+static float tier_echo(void) { return 1.0f + 0.30f * (float)hard_tier() * hard_cyc(); }
 static void henryk_dies(void);
 static void badge_drop(float x, float y, float z);
+static float g_hk_hp, g_hk_eh, g_hk_pos[2][4];      /* (g_hk_pos: where each stood, x y z facing; [0] Henryk, [1] Eileen) */
+static float g_hk_hp_dummy_;      /* henryk_memory: how much health Henryk and Eileen have left in their fight (0 = untouched), kept when you leave the arena and in the save */
 static int g_eil_fell; static float g_eil_dpos[3];      // hk_fight: Eileen was killed by Henryk (and where): the badge is then left on the ground
 static float g_eil_keep;      // hk_fight: the fraction of health she had when she turns on you (0 = full)
 static int g_eil_angry;      // hk_fight: you struck Eileen while she fought beside you: she turns on you once Henryk is dead
 static int badge_have(void) { for (int i = 0; i < MAX_INV; i++) if (g_inv[i].n > 0 && !strcmp(g_inv[i].key, "CrowHunterBadge")) return 1; return 0; }
-static float night_dmg(void) { return night2_on() ? NIGHT2_DMG : 1.0f; }
+static float night_dmg(void) { return (night2_on() ? NIGHT2_DMG : 1.0f) * (hard_on() ? tier_dm() : 1.0f); }
 static int drop_pick(float x, float y, float z, int bul, int vial, const char *key, const char *label, int kcnt, int kcat) {      // enemy_drops: what a creature drops lies on the floor where it fell, to be picked up with X (0 = no free slot: the caller gives it straight to you instead)
     int slot = -1; if (nPicks < MAX_PICKS) slot = nPicks++; else for (int i = 0; i < nPicks; i++) if (picks[i].dyn && picks[i].taken) { slot = i; break; }
     if (slot < 0) return 0;
@@ -10659,6 +11127,8 @@ static void enemy_hurt(float dmg) {
     if (en_ok && EN.ally && EN.state != E_DEAD) { if (!g_eil_angry) { g_eil_angry = 1; snd_play(S_E_AGGRO, 1.0f); maplog("eileen: you struck her - she will turn on you%s%s", "", ""); } return; }      // hk_fight
     if (!en_ok || EN.state == E_DEAD || EN.ally || (EN_NPC(EN.type) && !EN.hostile)) return;
     if (night2_on()) dmg /= NIGHT2_HP;
+    if (hard_on()) dmg /= tier_hp();      /* hard_tier */
+    if (EN.type == 13 && g_spd_have && rl_map() && !g_fire_dot) { float a_ = atan2f(g_ply - EN.p.y, g_plx - EN.p.x) - EN.face; while (a_ > 3.14159265f) a_ -= 6.28318531f; while (a_ < -3.14159265f) a_ += 6.28318531f; if (fabsf(a_) < 0.7f && EN.dl_mode != 9) { dmg *= 0.2f; for (int k_ = 0; k_ < 4; k_++) spark_spawn(EN.p.x + cosf(EN.face) * 0.8f, EN.p.y + sinf(EN.face) * 0.8f, EN.p.z + 0.6f, 0.1f); snd_play_at_p(S_PARRY, EN.p.x, EN.p.y, 0.5f, 1.6f); } }      /* rom_fight: a child of Rom's head is hard crystal: struck from the front it takes a fifth of the blow. Go for the sides and the back */
     if (EN_DUEL(EN) && EN.dl_dodge && EN.state == E_ATTACK && EN.st < EN.sdur * 0.65f) return;      // eileen_duel: nothing touches her while she rolls      // (19: Eileen cannot be hurt)
     if (g_fire_dot && EN.type != 4 && EN.hp - dmg > 0.0f) { EN.hp -= dmg; EN.dmg_sum += (int)(dmg + 0.5f); EN.dmg_t = 3.0f; return; }      // burn_quiet: the fire eating at a creature does not make it flinch
     if (!g_blood_gun) snd_play_at(S_HIT, EN.p.x, EN.p.y, 1.0f);
@@ -10675,7 +11145,7 @@ static void enemy_hurt(float dmg) {
     EN.vx = EN.vy = 0.0f; EN.hits = 0;
     if (EN.hp <= 0.0f) {
         EN.state = E_DEAD; EN.st = 0.0f; EN.sdur = en_len(EN.a_death); snd_play_at((EN.type == 1 || EN.type == 6) ? S_RAT_DEATH : (EN.type == 2 ? S_CROW_DEATH : (EN_BEAST(EN.type) ? S_CB_HOWL : S_ENEMY_DEATH)), EN.p.x, EN.p.y, EN_BEAST(EN.type) ? 0.9f : 1.0f);
-        { int v = echo_value(EN.type); if (night2_on()) v = (int)(v * NIGHT2_ECHO); if (g_ng > 0) v = (int)(v * ng_hpm()); g_echoes += v; if (g_echo_gain_t <= 0.0f) g_echo_gain = 0; g_echo_gain += v; g_echo_gain_t = 2.5f; }     // blood echoes
+        { int v = echo_value(EN.type); if (night2_on()) v = (int)(v * NIGHT2_ECHO); if (hard_on()) v = (int)(v * tier_echo()); if (g_ng > 0) v = (int)(v * ng_hpm()); g_echoes += v; if (g_echo_gain_t <= 0.0f) g_echo_gain = 0; g_echo_gain += v; g_echo_gain_t = 2.5f; }     // blood echoes
         int d_bul = 0, d_vial = 0; const char *d_key = NULL, *d_lab = NULL;      // enemy_drops: collected here, then laid on the floor below
         if (EN.type == 11) d_bul += 3; else if (EN.type == 17) d_bul += 4; else if ((EN.type == 0 || EN.type == 9) && frand() < 0.45f) d_vial += 2;      // sure_drop: a rifleman always drops 3 quicksilver bullets, a wheelchair gunman always 4
         if (EN.type == 5 || EN.type == 7) {      // blood_stones: werewolves and trolls drop blood stones, each tier rarer; every point of insight makes them likelier
@@ -10743,6 +11213,7 @@ static void henryk_hostile(void) {      // hk_fight: ECUR is Henryk; he fights E
     maplog("henryk: fight begins%s%s", "", "");
     EN.hostile = 1; EN.ally = 0; if (EN.a_fight >= 0) EN.a_idle = EN.a_fight;
     EN.hp_max = 500.0f; EN.hp = EN.hp_max; EN.aggro = 60.0f; EN.reach = 2.4f; EN.dmg = 36.0f; EN.stop = 1.8f; EN.atk_rate = 0.95f; EN.loco_rate = 1.0f; EN.cfg_always_run = 1; EN.bod = 0.5f; EN.hrad = 0.5f; EN.cz = 0.9f; EN.zlo = 0.0f; EN.zhi = 1.9f;
+    if (g_hk_hp > 0.0f) { EN.hp = EN.hp_max * g_hk_hp; if (g_hk_pos[0][3] > -100.0f && (g_hk_pos[0][0] != 0.0f || g_hk_pos[0][1] != 0.0f)) { EN.p.x = g_hk_pos[0][0]; EN.p.y = g_hk_pos[0][1]; EN.p.z = g_hk_pos[0][2]; EN.face = g_hk_pos[0][3]; } }
     EN.state = E_CHASE; EN.cool = 1.0f; EN.st = 0.0f; EN.stagger = 0; EN.dl_t = 0.5f; EN.dl_cd = 0.0f; EN.dl_mode = 0; EN.dl_dodge = 0; EN.vx = EN.vy = 0.0f; EN.leave = 0; EN.lv_vis = 1.0f; EN.tgt = 1; EN.tgt_t = 3.0f; ENEMY.show_pistol = 1;
     music_boss(1);
 }
@@ -10750,6 +11221,7 @@ static void eileen_ally_init(void) {      // hk_fight: ECUR is Eileen; she fight
     maplog("eileen: fights beside you%s%s", "", "");
     EN.hostile = 1; EN.ally = 1; if (EN.a_fight >= 0) EN.a_idle = EN.a_fight;
     EN.hp_max = 400.0f; EN.hp = EN.hp_max; EN.aggro = 60.0f; EN.reach = 2.3f; EN.dmg = 34.0f; EN.stop = 1.7f; EN.atk_rate = 1.2f; EN.loco_rate = 1.0f; EN.cfg_always_run = 1; EN.bod = 0.5f; EN.hrad = 0.5f; EN.cz = 0.9f; EN.zlo = 0.0f; EN.zhi = 1.9f;
+    if (g_hk_eh > 0.0f) { EN.hp = EN.hp_max * g_hk_eh; if (g_hk_pos[1][0] != 0.0f || g_hk_pos[1][1] != 0.0f) { EN.p.x = g_hk_pos[1][0]; EN.p.y = g_hk_pos[1][1]; EN.p.z = g_hk_pos[1][2]; EN.face = g_hk_pos[1][3]; } }
     EN.state = E_CHASE; EN.cool = 1.4f; EN.st = 0.0f; EN.stagger = 0; EN.dl_t = 0.5f; EN.dl_cd = 0.0f; EN.dl_mode = 0; EN.dl_dodge = 0; EN.vx = EN.vy = 0.0f; EN.down_t = 0.0f; ENEMY.show_pistol = 1;
 }
 static void eileen_ally_end(void) {      // hk_fight: Henryk is dead - she puts her blades away and stands where she is
@@ -10772,6 +11244,7 @@ static void badge_drop(float x, float y, float z) {      // hk_fight: the Crow H
     picks[nPicks++] = pk;
 }
 static void henryk_dies(void) {      // hk_fight: ECUR is Henryk
+    g_hk_hp = g_hk_eh = 0.0f; memset(g_hk_pos, 0, sizeof g_hk_pos);
     if (g_eil_fell) { g_eil_state = 2; g_arena_done = 1; music_boss(0); g_hk_reward = 0; badge_drop(g_eil_dpos[0], g_eil_dpos[1], g_eil_dpos[2]); maplog("henryk: dead - Eileen's badge is on the ground%s%s", "", ""); return; }
     g_eil_state = g_eil_angry ? 1 : 3; g_arena_done = 1; music_boss(0); g_hk_reward = g_eil_angry ? 0 : 4; g_hk_scene = !g_eil_angry; maplog(g_eil_angry ? "henryk: dead - Eileen turns on you%s%s" : "henryk: dead%s%s", "", "");
     { int ei = hk_find(19); if (ei >= 0) { Enemy *sv = ECUR; ECUR = &ENS[ei]; if (g_eil_angry) { g_eil_keep = ENS[ei].hp / ENS[ei].hp_max; if (g_eil_keep < 0.12f) g_eil_keep = 0.12f; } eileen_ally_end(); if (g_eil_angry) EN.hp = EN.hp_max * g_eil_keep; ECUR = sv; } }
@@ -10940,6 +11413,7 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
     if (EN.cool > 0.0f) EN.cool -= dt;
     if (EN.dmg_t > 0.0f) { EN.dmg_t -= dt; if (EN.dmg_t <= 0.0f) EN.dmg_sum = 0; }
     if (EN.type == 1) {                                          // rat: tiny paw steps as it scurries
+        if (hard_tier() > 0 && EN.state != E_DEAD && dist < 30.0f) glow_add_c(EN.p.x + cosf(EN.face) * 0.28f, EN.p.y + sinf(EN.face) * 0.28f, EN.p.z + 0.4f, 0.3f, 3);      /* rat_glow: in the blood moon a faint purple light shines in the rats' heads */
         float mx_ = EN.p.x - EN.fs_x, my_ = EN.p.y - EN.fs_y, m_ = sqrtf(mx_ * mx_ + my_ * my_); EN.fs_x = EN.p.x; EN.fs_y = EN.p.y;
         if (m_ < 0.6f && (EN.state == E_CHASE || EN.state == E_ATTACK)) { EN.fs_acc += m_; if (EN.fs_acc > 0.55f) { EN.fs_acc = 0.0f; snd_play_at(S_RAT_STEP, EN.p.x, EN.p.y, 0.6f); } } else EN.fs_acc = 0.0f;
     }
@@ -10965,7 +11439,7 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
     case E_CHASE: {
         g_hop_pz = pl->z;
         { float tg_ = want; if (EN.type != 2 && EN.type != 4 && !EN.fixed && dist > 2.0f && dist < 25.0f && EN.p.grounded && !EN_DUEL(EN)) tg_ = en_steer(&EN, want, dt); else EN.steer_a = 0.0f;      // ai_path
-          if (!EN_DUEL(EN)) turn_to(&EN.face, tg_, 7.0f * dt); }
+          if (!EN_DUEL(EN)) turn_to(&EN.face, tg_, (EN.type == 13 && g_spd_have && rl_map() ? 1.0f : 7.0f) * dt); }      /* rom_fight: her children turn slowly, so you can get round to their soft sides */
         float ad = want - EN.face; while (ad > 3.14159265f) ad -= 6.28318531f; while (ad < -3.14159265f) ad += 6.28318531f;
         if EN_DUEL(EN) { eileen_duel(dt, dist, want, &mx, &my); if (EN.state == E_ATTACK) break; }      // eileen_duel
         else if (dist > EN.stop + (EN.ch_hold ? 0.5f : 0.0f)) {      // chase_hold: once they have stopped they only set off again after a margin, so they don't flicker between running and idle at the edge
@@ -10986,8 +11460,8 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
                 if (brk_block_ahead(EN.p.x, EN.p.y, EN.p.z, EN.face, EN.p.x, EN.p.y, 0)) { EN.bk_t += dt; if (EN.bk_t > 0.5f) { brk_block_ahead(EN.p.x, EN.p.y, EN.p.z, EN.face, EN.p.x, EN.p.y, 1); EN.bk_t = 0.0f; } } else EN.bk_t = 0.0f;
             }
             en_play(run ? EN.a_run : (EN.a_walk >= 0 ? EN.a_walk : EN.a_idle), ANIM_BLEND, 0);
-        } else { EN.ch_hold = 1; en_play(EN.a_idle, ANIM_BLEND, 0); }
-        if (dist < EN.reach && EN.cool <= 0.0f && fabsf(ad) < (EN_SHOOTER(EN.type) ? 0.25f : 0.6f) && EN.n_atk > 0 && (!EN_SHOOTER(EN.type) || en_clear_shot(pl))) {
+        } else { EN.ch_hold = 1; en_play((EN.type == 13 && g_spd_have && rl_map() && fabsf(ad) > 0.15f && EN.a_walk >= 0) ? EN.a_walk : EN.a_idle, ANIM_BLEND, 0); }      /* (a child turning on the spot walks its legs round) */
+        if (dist < ((EN.type == 13 && g_spd_have && rl_map()) ? 4.4f : EN.reach) && EN.cool <= 0.0f && fabsf(ad) < (EN_SHOOTER(EN.type) ? 0.25f : ((EN.type == 13 && g_spd_have && rl_map()) ? 0.9f : 0.6f)) && EN.n_atk > 0 && (!EN_SHOOTER(EN.type) || en_clear_shot(pl))) {
             int a = EN.a_atk[(int)(frand() * EN.n_atk) % EN.n_atk];
             EN.sdur = en_len(a) / EN.atk_rate; if (EN.sdur < 0.4f) EN.sdur = 0.4f; if (EN.sdur > 3.0f) EN.sdur = 3.0f;
             float tx = ENEMY.anim[a].tx, ty = ENEMY.anim[a].ty, tl = sqrtf(tx * tx + ty * ty);
@@ -11006,27 +11480,36 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
             break;
         }
         EN.st += dt; float f = EN.st / EN.sdur;
-        if (f < 0.35f) turn_to(&EN.face, want, 3.5f * dt);              // tracks you during the wind-up, then commits
+        if (f < 0.35f) turn_to(&EN.face, want, (EN.type == 13 && g_spd_have && rl_map() ? 0.4f : 3.5f) * dt);              // tracks you during the wind-up, then commits
         mx = EN.vx; my = EN.vy;
         if (dist < (EN.type ? EN.bod + 0.2f : 1.0f)) mx = my = 0.0f;
+        if (EN.type == 13 && g_spd_have && rl_map()) {      /* rom_fight: a child crouches, leaps at where you were, lands, and is then open for a moment */
+            if (f < 0.35f) { mx = my = 0.0f; EN.hits &= ~4; }
+            else if (f < 0.62f) {
+                if (!(EN.hits & 4)) { EN.hits |= 4; float sp_ = (dist - 0.7f) / (0.27f * EN.sdur); if (sp_ < 3.0f) sp_ = 3.0f; if (sp_ > 14.0f) sp_ = 14.0f; EN.vx = cosf(EN.face) * sp_; EN.vy = sinf(EN.face) * sp_; EN.p.vz = 3.4f; EN.p.grounded = 0; snd_play_at(S_RAT_ATK, EN.p.x, EN.p.y, 0.9f); }
+                mx = EN.vx; my = EN.vy;
+            } else mx = my = 0.0f;
+        }
         int win = f >= 0.5f;                                            // 2-hit combos can connect once per half
         if (EN_SHOOTER(EN.type)) {                                            // rifleman / wheelchair: one shot mid-animation, if the line is still clear
             if (f > 0.5f && !(EN.hits & 1)) { EN.hits |= 1; snd_play_at(S_GUN, EN.p.x, EN.p.y, 0.9f); { float cf_ = cosf(EN.face), sf_ = sinf(EN.face); glow_add(EN.p.x + cf_ * 0.7f, EN.p.y + sf_ * 0.7f, EN.p.z + 1.3f, 1.3f); for (int k = 0; k < 2; k++) smoke_puff(EN.p.x + cf_ * 0.8f, EN.p.y + sf_ * 0.8f, EN.p.z + 1.3f, 0.25f); } float a2 = want - EN.face; while (a2 > 3.14159265f) a2 -= 6.28318531f; while (a2 < -3.14159265f) a2 += 6.28318531f; if (!invuln && fabsf(a2) < 0.35f && en_clear_shot(pl)) dmg = EN.dmg * night_dmg(); }
         } else if (EN.type != 0) {                                      // creatures bite / peck: one contact hit per attack, mid-animation
-            if (f > 0.25f && f < 0.8f && !(EN.hits & 1) && dist < EN.reach + 0.4f && fabsf(pl->z - EN.p.z) < 1.6f) { EN.hits |= 1; if (!invuln) { dmg = EN.dmg * night_dmg(); if (EN.type == 25) g_wl_grab_req = 1; } }
+            if (f > (EN.type == 13 && g_spd_have && rl_map() ? 0.4f : 0.25f) && f < (EN.type == 13 && g_spd_have && rl_map() ? 0.75f : 0.8f) && !(EN.hits & 1) && dist < EN.reach + (EN.type == 13 && g_spd_have && rl_map() ? 0.8f : 0.4f) && fabsf(pl->z - EN.p.z) < 1.6f) { EN.hits |= 1; if (!invuln) { dmg = EN.dmg * night_dmg(); if (EN.type == 25) g_wl_grab_req = 1; } }
         } else if (f > 0.2f && f < 0.85f && !(EN.hits & (1 << win))) {
             float A[3], B[3];
             char_blade(&ENEMY, EN.p.x, EN.p.y, EN.p.z, EN.face, A, B);
-            if (blade_hits(A, B, pl->x, pl->y, pl->z, 0.35f)) { EN.hits |= 1 << win; if (!invuln) dmg = EN.dmg * night_dmg(); }
+            if (blade_hits(A, B, pl->x, pl->y, pl->z, 0.35f)) { EN.hits |= 1 << win; if (!invuln) { dmg = EN.dmg * night_dmg(); if (EN.type == 1 && hard_tier() > 0 && g_pois_t <= 0.0f) { g_pois_build += 15.0f; if (g_pois_build > g_pcfg[0]) { g_pois_build = g_pcfg[0]; g_pois_t = g_pcfg[3]; snd_play(S_PLAYER_HURT, 0.7f); maplog("poisoned (rat bite)%s%s", "", ""); } } } }      /* rat_poison: each bite that lands adds 15 poison build-up in the blood moon */
         }
+        if (EN.st >= EN.sdur && EN.type == 13 && g_spd_have && rl_map()) { EN.state = E_HURT; EN.stagger = 0; EN.dl_mode = 9; EN.st = 0.0f; EN.sdur = 1.5f; EN.vx = EN.vy = 0.0f; EN.hits = 0; en_play(EN.n_hurt ? EN.a_hurt[0] : EN.a_idle, 0.08f, 1); break; }      /* rom_fight: the landing leaves it open (dl_mode 9: no hard head for this moment) */
         if (EN.st >= EN.sdur) { EN.state = E_CHASE; EN.dl_t = 0.0f; EN.cool = EN_DUEL(EN) ? 0.5f + frand() * 0.7f : EN.type == 7 ? 2.0f + frand() * 1.4f : (EN.type == 15 ? 1.8f + frand() * 1.2f : EN.type >= 5 ? 1.2f + frand() * 1.0f : 0.8f + frand() * 0.8f); }      // werewolf / troll walk in again between blows
         break; }
     case E_HURT:
         EN.st += dt;
-        if (EN.st >= EN.sdur) { EN.state = E_CHASE; EN.cool = 0.4f; EN.stagger = 0; }
+        if (EN.st >= EN.sdur) { EN.state = E_CHASE; EN.cool = (EN.type == 13 && g_spd_have && rl_map()) ? 1.3f + frand() * 1.0f : 0.4f; EN.stagger = 0; if (EN.dl_mode == 9) EN.dl_mode = 0; }
         break;
     case E_DEAD:
         EN.st += dt;
+        if (EN.type == 13 && rl_map() && EN.st > 0.9f && EN.st < 2.3f && frand() < dt * 22.0f) smoke_puff(EN.p.x + (frand() - 0.5f) * 1.2f, EN.p.y + (frand() - 0.5f) * 1.2f, EN.p.z + 0.2f + frand() * 0.5f, 0.7f);      /* her children fade away in smoke */
         break;
     }
     if (EN.state >= 0 && EN.state < 5) g_en_st[EN.state]++;
@@ -11044,6 +11527,7 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
     if (skin_it && g_fpl_ok && dist > 5.0f) {                                     // ...and so does anything outside last frame's view
         for (int k = 0; k < 6; k++) if (g_fpl_prev[k][0] * EN.p.x + g_fpl_prev[k][1] * EN.p.y + g_fpl_prev[k][2] * (EN.p.z + 1.0f) + g_fpl_prev[k][3] < -3.5f) { skin_it = 0; break; }
         if (skin_it && dist > 16.0f && ((g_frame_ctr + (unsigned)(ECUR - ENS)) & 1u)) skin_it = 0;      // far ones animate every other frame
+        if (skin_it && EN.type == 13 && rl_map() && dist > 7.0f && ((g_frame_ctr + (unsigned)(ECUR - ENS)) & 1u)) skin_it = 0;      /* rom_lod: her seven children, 7 m or more away, are posed and skinned every other frame (the fight costs about 10 ms a frame more than the other arenas) */
     }
     {   // a body that has finished falling never changes: pose and skin it once, then leave it alone
         static unsigned char dead_done[MAX_ENEMIES]; int di_ = (int)(ECUR - ENS);
@@ -11056,6 +11540,14 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
     if (skin_it) {
         uint64_t ps0_ = sceKernelGetProcessTimeWide();
         CUR = &ENEMY;
+        if (EN.type == 20 && ENEMY.hand >= 0 && ENEMY.nWA) {      /* henryk_xform: the saw cleaver unfolds when he swings and folds again afterwards, like the player's */
+            int o_ = cwpick(&ENEMY, "open"), c_ = cwpick(&ENEMY, "closeidle"); if (c_ < 0) c_ = cwpick(&ENEMY, "closedidle");
+            float dt_ = g_glow_t - EN.xf_t; if (dt_ < 0.0f || dt_ > 0.1f) dt_ = 0.033f; EN.xf_t = g_glow_t;
+            int want_ = (EN.hostile && EN.state == E_ATTACK) ? 1 : 0;
+            if (want_ != EN.xf_dir) { EN.xf_dir = want_; if (g_snd_nv[S_W_CLEAV_XFORM]) snd_play_at(S_W_CLEAV_XFORM, EN.p.x, EN.p.y, 0.7f); }
+            EN.xf += (want_ ? 1.0f : -1.0f) * dt_ / 0.3f; if (EN.xf < 0.0f) EN.xf = 0.0f; if (EN.xf > 1.0f) EN.xf = 1.0f;
+            if (o_ >= 0 && EN.xf > 0.0f) weapon_sample(o_, weapon_len(o_) * EN.xf); else if (c_ >= 0) weapon_sample(c_, 0.0f); else ENEMY.wset = 0;
+        }
         hunter_pose(EN.a_cur, EN.t_cur, EN.a_prev, EN.t_prev, EN.blend);
         hunter_skin();
         CUR = &HUNT;
@@ -11064,6 +11556,7 @@ static float enemy_update_core(float dt, const Player *pl, int invuln) {
     return dmg;
 }
 static float enemy_update(float dt, const Player *pl, int invuln) {      // hk_fight: Henryk and Eileen pick their targets; everyone else goes straight to the normal update
+    if (g_eil_state == 0 && EN.hostile && EN.state != E_DEAD && EN.hp_max > 1.0f) { if (EN.type == 20) { g_hk_hp = EN.hp / EN.hp_max; if (g_hk_hp < 0.02f) g_hk_hp = 0.02f; g_hk_pos[0][0] = EN.p.x; g_hk_pos[0][1] = EN.p.y; g_hk_pos[0][2] = EN.p.z; g_hk_pos[0][3] = EN.face; } else if (EN.type == 19 && EN.ally) { g_hk_eh = EN.down_t > 0.0f ? 0.5f : EN.hp / EN.hp_max; if (g_hk_eh < 0.02f) g_hk_eh = 0.02f; g_hk_pos[1][0] = EN.p.x; g_hk_pos[1][1] = EN.p.y; g_hk_pos[1][2] = EN.p.z; g_hk_pos[1][3] = EN.face; } }      /* henryk_memory */
     if (EN.state != E_DEAD && EN.hostile && EN.type == 20) {      // Henryk: Eileen while you are away, you once you come close (or now and then)
         int ei = hk_find(19); int ok = ei >= 0 && ENS[ei].ally && ENS[ei].down_t <= 0.0f;
         EN.tgt_t -= dt; if (EN.tgt_t <= 0.0f) { float dp = hypotf(pl->x - EN.p.x, pl->y - EN.p.y); EN.tgt = (ok && (dp > 5.5f || frand() < 0.3f)) ? 1 : 0; EN.tgt_t = 2.0f + frand() * 2.5f; }
@@ -11108,7 +11601,7 @@ static float enemy_update(float dt, const Player *pl, int invuln) {      // hk_f
 #define BOSS_WALL_Y    7.5f
 #define BOSS_WALL_HW   2.6f
 #define BOSS_WALL_H    7.7f      /* was 3.4: taller */
-enum { BF_SHOOT = 1, BF_BODY = 2, BF_RETREAT = 4, BF_GAP = 8, BF_BEHIND = 16, BF_PURE = 32, BF_GRAB = 64 };    // pure = a shot only (no melee windows); gap = a lunge that closes the distance; body = also hurts by contact
+enum { BF_SHOOT = 1, BF_BODY = 2, BF_RETREAT = 4, BF_GAP = 8, BF_BEHIND = 16, BF_PURE = 32, BF_GRAB = 64, BF_BEAM = 128, BF_PULL = 256, BF_ARC = 512, BF_GUST = 1024, BF_CHARGE = 2048, BF_AIM = 4096, BF_QUICK = 8192, BF_STEP = 16384, BF_WAVE = 32768, BF_ORB = 65536, BF_METEOR = 1 << 17, BF_ICE = 1 << 18, BF_BLAST = 1 << 19 };      /* orb: (the Moon Presence) he spits a volley of blood orbs that curve after you */      /* wave: (Gehrman, below half health) the swing throws a crescent of light that flies at you */    // pure = a shot only (no melee windows); gap = a lunge that closes the distance; body = also hurts by contact
 enum { SUB_WAIT, SUB_CHASE, SUB_ATTACK, SUB_TRANS, SUB_STAG, SUB_DEAD };
 typedef struct { const char *name; float dmin, dmax, w, dmg; int fl; } BDef;
 typedef struct { int a, wa, fl, nwin; float len, dmin, dmax, w, dmg, win[4][2], shot_f, tx, ty; } BMove;
@@ -11118,21 +11611,45 @@ static Char GILC; static int gb_ok = 0, g_gb_dead = 0;      // gilbert_boss: his
 #define GB_ALIVE (!g_gb_dead || g_gb_redo)
 #define GB_HP 1600.0f
 #define GB_Z_SIT 7.70f
+static int g_gh_dying;      /* gh_dying: set the moment he is killed (g_gh_dead then makes gh_map() false, which used to cut his death hold short and drop his weapon adjustments, so he got up again) */
 static int g_gh_torch;      // gh_torch: Gehrman has lit a torch in his free hand (at half health)
 static int g_gb_healed, g_gb_gfail = -1, g_gb_bfa[2] = { -1, -1 }, g_gbt_done;      // gilbert_mech: the heal happened, his failed-grab / break-free attack animations, the bed has fallen
 static Char GEHC; static int gh_ok = 0, g_gh_spear = 0; static float g_gh_half = 1.0f;      // g_gh_spear: his weapon is the blood spear, unfolded only g_gh_half of the way      // gehrman_boss: his model (gehr.bin: his body, Gascoigne's hunter animations, axe and pistol)
 #define GH_ALIVE (!g_gh_dead || g_gh_redo)
-#define GH_READY ((g_gb_dead && !g_gb_redo) && g_gas_dead && !g_gas_redo && g_cb_dead && !g_cb_redo)      /* he can be fought only when Gascoigne, the Cleric Beast and Gilbert are all dead */
-static int ng_bosses(void) { return (g_gas_dead != 0) + (g_cb_dead != 0) + (g_gb_dead != 0) + (g_gh_dead != 0); }      // new game plus needs all four defeated at least once this playthrough
+#define GH_READY ((g_gb_dead && !g_gb_redo) && g_gas_dead && !g_gas_redo && g_cb_dead && !g_cb_redo && ((g_story & 4) || g_rush))      /* he can be fought only when Gascoigne, the Cleric Beast and Gilbert are all dead */
+static int ng_bosses(void) { int rom_ = (g_story & 4) != 0; /* Rom is a boss of the count now (the blood moon: she is dead) */ return rom_ + (g_rush ? (g_rs[0] != 0) + (g_rs[1] != 0) + (g_rs[2] != 0) + (g_rs[3] != 0) : (g_gas_dead != 0) + (g_cb_dead != 0) + (g_gb_dead != 0) + (g_gh_dead != 0)); }      /* boss rush kills do not count */      // new game plus needs all four defeated at least once this playthrough
 #define GH_HP 1500.0f
 static float gh_dfrac(void) { static float v_ = -1.0f; if (v_ < 0.0f) { v_ = 0.6f; FILE *f_ = fopen("ux0:data/bbpsx/gh_death.txt", "r"); if (f_) { float a_; if (fscanf(f_, "%f", &a_) == 1 && a_ > 0.2f && a_ <= 1.0f) v_ = a_; fclose(f_); } } return v_; }      /* gh_death: his death is the visceraled animation, which ends with him getting up: it is held after this fraction of its length (gh_death.txt) */
+
+static float en_len(int a);
+static float gh_dlen(int a) {      /* gh_death2: how long his fall plays before it is held: up to the moment he lies lowest (the frame where the mean height of the bones is least), so he never starts to get up; gh_death.txt still overrides it */
+    static int ov_ = -1, ca_ = -2; static const void *ck_ = NULL; static float ct_ = 0.0f;
+    if (ov_ < 0) { FILE *f_ = fopen("ux0:data/bbpsx/gh_death.txt", "r"); ov_ = f_ ? 1 : 0; if (f_) fclose(f_); }
+    float full = en_len(a); if (a < 0 || ov_) return full * gh_dfrac();
+    if (ca_ != a || ck_ != (const void *)ENEMY.anim) {
+        ca_ = a; ck_ = (const void *)ENEMY.anim; ct_ = 0.0f; const HAnim *A = &ENEMY.anim[a];
+        if (A->m && A->nf >= 4 && ENEMY.nB > 0) {
+            size_t per = (size_t)ENEMY.nB + ENEMY.nAt; float lo = 1e9f, hi = -1e9f; float *zs = (float *)malloc(A->nf * sizeof(float));
+            if (zs) {
+                for (uint32_t f = 0; f < A->nf; f++) { float z = 0.0f; for (uint32_t b = 0; b < ENEMY.nB; b++) z += A->m[(f * per + b) * 12 + 11]; z /= (float)ENEMY.nB; zs[f] = z; if (z < lo) lo = z; if (z > hi) hi = z; }
+                for (uint32_t f = 0; f < A->nf; f++) if (zs[f] <= lo + 0.03f * (hi - lo)) { ct_ = (float)(f + 1) / A->fps; break; }
+                free(zs);
+            }
+        }
+        { char t_[100]; snprintf(t_, sizeof t_, "gehrman: death held at %.2f s of %.2f s", ct_, full); maplog("%s%s", t_, ""); }
+    }
+    return (ct_ > 0.2f && ct_ < full) ? ct_ : full * gh_dfrac();
+}
 static const float g_ghp[3] = { 6.76f, -38.24f, 2.70f };      // the flower garden: where he waits (placed in game)
 #define GH_X g_ghp[0]
 #define GH_Y g_ghp[1]
 #define GH_Z g_ghp[2]
 static int gh_map(void) { return gh_ok && GH_ALIVE && GH_READY && !strcasecmp(cur_map, "huntersdream"); }      // after Gilbert falls, Gehrman waits in the garden
 static int g_cb_lpb[3] = { -1, -1, -1 }; static float g_cb_lpr[3][3];      // the Cleric Beast's extra lock-on points: head, left leg, right leg (a bone each + a spot in its rest pose)
-static Char CBC;                    // the Cleric Beast's model (clericbeast.bin)
+static Char ROMC;      /* rom_fight: ROMC = Rom (rom.bin); her children (romchild.bin) take the unused dog-crow's creature slot (type 13). Both are loaded on entering her lake and freed on leaving it */
+static Char CBC, AMGC, AMGC2, MOONC[2]; static int g_amg2_have, g_amg_arms_m;      /* arm_tear: AMGC2 = the Amygdala with his arms torn off and held as clubs (amyg2.bin); g_amg_arms_m mirrors g_amg_arms for cb_char */
+static int g_moon_alias; static int g_amg_have, g_moon_have, g_moon_form, g_moon_start;      /* moon_arena: MOONC = the Moon Presence (moonp1.bin, moonp2.bin: his two forms); g_moon_form = which one is in play */                    // the Cleric Beast's model (clericbeast.bin); AMGC = the Amygdala (amyg.bin), used in the Rom arena
+static Char *cb_char(void) { if (rl_map() && g_rom_have) return &ROMC; if (moon_map() && g_moon_have) return &MOONC[g_moon_form ? 1 : 0]; return (rom_map() && g_amg_have) ? ((g_amg_arms_m && g_amg2_have) ? &AMGC2 : &AMGC) : &CBC; }
 static int cb_ok = 0, g_cb_dead = 0, g_cb_open = 0, g_cb_shut = 0;      // dead: he has been killed this session; open/shut: his fog gate
 static Char GASB;                   // the beast model (the hunter model is PROTO[3].ch)
 static int boss_ok = 0;
@@ -11242,6 +11759,7 @@ static const char *const PAN_DEF[][2] = {
     },
     { "gascoignearena",
       "0.282 7.376 0.972 5.982 10.203 -0.0087\n"
+      "6.060 60.100 13.000 5.400 6.200 0.0000\n"
     },
     { "ge_bossarena",
       "2.446 24.088 11.570 5.800 6.708 -0.0077\n"
@@ -11270,14 +11788,14 @@ static const char *const PAN_DEF[][2] = {
       "-36.381 67.208 30.293 3.147 5.468 3.1720\n"
     },
     { "greatbonfire",
-      "-12.194 96.979 7.633 8.305 11.356 3.1302 -1\n"
-      "13.738 96.394 8.134 8.319 10.110 3.1354 -1\n"
-      "-25.893 17.657 6.845 6.876 16.990 4.3742 -1\n"
+      "-12.194 96.979 7.633 8.305 11.356 3.1302\n"
+      "13.738 96.394 8.134 8.319 10.110 3.1354\n"
+      "-25.893 17.657 6.845 6.876 16.990 4.3742\n"
       "37.913 79.673 16.076 6.831 11.708 3.1561 -1\n"
     },
     { "greatbridgeexterior",
-      "-14.647 42.674 -0.955 7.046 6.242 -1.5665 -1\n"
-      "-0.093 79.639 1.511 12.920 12.244 3.1647 -1\n"
+      "-14.647 42.674 -0.955 7.046 6.242 -1.5665\n"
+      "-0.093 79.639 1.511 12.920 12.244 3.1647\n"
       "-19.371 -3.951 -3.523 6.124 7.468 -1.5587 -1\n"
     },
     { "huntersdream",
@@ -11293,12 +11811,25 @@ static const char *const PAN_DEF[][2] = {
       "17.540 -29.811 6.333 4.970 6.503 -0.0107\n"
     },
     { "ic_firstfloorsickroom",
-      "-31.937 78.421 8.963 3.639 5.354 3.0805\n"
+      "-31.937 78.421 8.963 3.639 5.354 3.0805 -1\n"
+      "-25.937 -19.127 12.026 4.802 6.531 -0.0200 -1\n"
+    },
+    { "ic_sickroom2",
+      "-25.930 21.580 12.000 2.400 3.400 0.0000\n"
     },
     { "junction",
       "13.554 94.082 -1.030 9.272 15.070 3.3031\n"
       "47.250 2.472 9.863 7.406 14.951 1.5931\n"
       "53.531 -16.640 0.551 4.925 4.079 0.0006\n"
+    },
+    { "oedonchapel",
+      "23.062 -0.184 0.918 8.384 19.495 4.6996 -1\n"
+      "7.533 -6.031 9.125 9.484 14.622 -0.0098 -1\n"
+      "7.404 5.928 8.916 11.318 15.354 3.1635 -1\n"
+      "12.073 0.007 20.024 2.000 2.500 -1.5543 -1\n"
+      "12.385 -0.056 20.212 3.513 5.740 -1.5270 -1\n"
+      "-12.182 0.004 20.221 2.000 2.500 1.5632 -1\n"
+      "-12.182 0.004 20.221 6.257 6.427 1.5632 -1\n"
     },
     { "poisonchannel",
       "-42.733 -97.510 1.702 4.925 4.365 1.5743\n"
@@ -11316,6 +11847,10 @@ static const char *const PAN_DEF[][2] = {
     },
     { NULL, NULL } };
 static const char *const TSW_DEF[][2] = {
+    { "backstreets",
+      "807 0 30\n"
+      "736 0 30\n"
+    },
     { "boulderbridge",
       "1437 13 29\n"
       "1435 13 29\n"
@@ -11407,6 +11942,114 @@ static const char *const TSW_DEF[][2] = {
       "43 1 13\n"
       "43 0 16\n"
     },
+    { "oedonchapel",
+      "180 0 8\n"
+      "182 0 9\n"
+      "184 0 9\n"
+      "186 0 8\n"
+      "187 0 8\n"
+      "185 0 9\n"
+      "183 0 9\n"
+      "181 0 8\n"
+      "29 0 1\n"
+      "28 0 1\n"
+      "31 0 1\n"
+      "30 0 1\n"
+      "153 0 4\n"
+      "133 0 4\n"
+      "57 0 8\n"
+      "58 0 8\n"
+      "59 0 8\n"
+      "60 0 8\n"
+      "61 0 8\n"
+      "56 0 8\n"
+      "55 0 8\n"
+      "54 0 8\n"
+      "53 0 8\n"
+      "52 0 8\n"
+      "390 0 2\n"
+      "391 0 2\n"
+      "387 0 2\n"
+      "386 0 2\n"
+      "380 0 2\n"
+      "381 0 2\n"
+      "382 0 2\n"
+      "374 0 2\n"
+      "375 0 2\n"
+      "373 0 2\n"
+      "372 0 2\n"
+      "377 0 2\n"
+      "376 0 2\n"
+      "383 0 2\n"
+      "384 0 2\n"
+      "385 0 2\n"
+      "378 0 2\n"
+      "379 0 2\n"
+      "389 0 2\n"
+      "388 0 2\n"
+      "393 0 2\n"
+      "392 0 2\n"
+      "691 0 11\n"
+      "692 0 11\n"
+      "687 0 6\n"
+      "688 0 6\n"
+      "685 0 6\n"
+      "686 0 6\n"
+      "231 0 3\n"
+      "230 0 4\n"
+      "240 0 5\n"
+      "242 0 3\n"
+      "232 0 5\n"
+      "228 0 6\n"
+      "238 0 6\n"
+      "248 0 6\n"
+      "246 0 6\n"
+      "256 0 6\n"
+      "266 0 6\n"
+      "276 0 6\n"
+      "288 0 6\n"
+      "284 0 6\n"
+      "277 0 6\n"
+      "267 0 6\n"
+      "257 0 6\n"
+      "247 0 6\n"
+      "237 0 6\n"
+      "227 0 6\n"
+      "229 0 6\n"
+      "239 0 6\n"
+      "249 0 6\n"
+      "241 0 5\n"
+      "243 0 3\n"
+      "233 0 5\n"
+      "251 0 5\n"
+      "253 0 4\n"
+      "261 0 4\n"
+      "271 0 3\n"
+      "259 0 5\n"
+      "269 0 3\n"
+      "279 0 5\n"
+      "281 0 4\n"
+      "263 0 5\n"
+      "273 0 5\n"
+      "283 0 5\n"
+      "287 0 5\n"
+      "291 0 5\n"
+      "290 0 5\n"
+      "286 0 5\n"
+      "285 0 5\n"
+      "289 0 5\n"
+      "278 0 5\n"
+      "280 0 5\n"
+      "282 0 5\n"
+      "272 0 5\n"
+      "262 0 5\n"
+      "252 0 5\n"
+      "250 0 5\n"
+      "260 0 5\n"
+      "270 0 5\n"
+      "258 0 5\n"
+      "268 0 5\n"
+    },
     { "sewershortcut",
       "293 0 14\n"
       "294 0 14\n"
@@ -11419,9 +12062,6 @@ static const char *const TSW_DEF[][2] = {
       "853 0 11\n"
       "854 0 11\n"
       "1591 0 9\n"
-      "1714 0 -2\n"
-      "1715 0 -2\n"
-      "1715 1 -2\n"
     },
     { NULL, NULL } };
 // END MAP DEFAULTS
@@ -11458,6 +12098,19 @@ static const BDef BD1[] = {            // phase 1: axe unfolded
     {"2HRollShoot", 2, 9, 1, 0, BF_SHOOT | BF_PURE}, {"2HShoot", 4, 16, 2, 0, BF_SHOOT | BF_PURE}, {"2HDashBShoot", 0, 3.5f, 1, 0, BF_SHOOT | BF_PURE | BF_RETREAT},
     {"2HDashLShoot", 2.5f, 8, 1, 0, BF_SHOOT | BF_PURE}, {"2HDashRShoot", 2.5f, 8, 1, 0, BF_SHOOT | BF_PURE}, {NULL}
 };
+static const BDef GH0[] = {            // gh_redo, phase 0: the Burial Blade as a curved sword with the pistol: swift flurries, an aimed stagger shot (then a gap-closer), quicksteps and rolls
+    {"1HSwingDiag1", 0, 2.8f, 3, 20, 0}, {"1H2HitCombo", 0, 3.0f, 3, 17, 0}, {"1H3HitCombo", 0, 3.2f, 3, 16, 0}, {"1HSwingBehind", 0, 2.6f, 1, 20, BF_BEHIND},
+    {"1HDashSwingDiag", 2.6f, 9, 3, 24, BF_GAP}, {"1HRollHit", 2.6f, 9, 3, 22, BF_GAP}, {"1H2HitShootCombo", 0, 5, 2, 18, BF_SHOOT},
+    {"1HShoot", 4, 16, 3, 0, BF_SHOOT | BF_PURE | BF_AIM}, {"1HDashBShoot", 0, 3.5f, 2, 0, BF_SHOOT | BF_PURE | BF_RETREAT | BF_STEP},
+    {"1HDashLShoot", 2.5f, 8, 1, 0, BF_SHOOT | BF_PURE | BF_STEP}, {"1HDashRShoot", 2.5f, 8, 1, 0, BF_SHOOT | BF_PURE | BF_STEP}, {NULL}
+};
+static const BDef GH1[] = {            // gh_redo, phase 1: the scythe: wide swings, a pull that drags you in, a charged slam, a leap that sends out gusts, and (below half health) the arcane blast
+    {"2HSwingHori1", 0, 9.0f, 3, 30, BF_WAVE}, {"2H3HitCombo", 0, 3.4f, 3, 28, 0}, {"2HSpinAttack", 0, 3.2f, 2, 30, 0}, {"2HHeavyHori", 0, 11.0f, 2, 40, BF_WAVE},
+    {"2HSwingBehind", 0, 2.6f, 1, 28, BF_BEHIND}, {"2HSlam", 0, 3.4f, 2, 56, BF_CHARGE},
+    {"2HRollStab", 2.8f, 9, 3, 32, BF_GAP}, {"2HJumpSlam", 3, 12, 3, 40, BF_GAP | BF_BODY | BF_GUST}, {"2HShoot", 4, 16, 2, 0, BF_SHOOT | BF_PURE | BF_AIM},
+    {"2HDashBShoot", 0, 3.5f, 1, 0, BF_SHOOT | BF_PURE | BF_RETREAT | BF_STEP}, {"2HDashLShoot", 2.5f, 8, 1, 0, BF_SHOOT | BF_PURE | BF_STEP}, {"2HDashRShoot", 2.5f, 8, 1, 0, BF_SHOOT | BF_PURE | BF_STEP},
+    {"Transform", 0, 99, 0, 0, BF_QUICK}, {"Transform", 0, 30, 2, 0, BF_ARC}, {NULL}
+};
 static const BDef BD2[] = {            // phase 2: the beast
     {"Swing1", 0, 3.0f, 3, 32, 0}, {"2HitCombo", 0, 3.2f, 3, 30, 0}, {"5HitCombo", 0, 3.4f, 2, 26, 0}, {"5HitCombo+Kick", 0, 3.4f, 2, 28, BF_BODY},
     {"AtkL", 0, 2.6f, 3, 30, 0}, {"AtkR", 0, 2.6f, 3, 30, 0}, {"Slam", 0, 3.2f, 2, 44, 0}, {"JumpSlam", 0, 4.5f, 2, 46, BF_BODY},
@@ -11465,11 +12118,22 @@ static const BDef BD2[] = {            // phase 2: the beast
 };
 
 #define CB_HP        1267.0f
-#define CB_HOME_X    (-25.0f)       /* BPC_ClericBeast_2 */
-#define CB_HOME_Y    62.5f       /* between the lantern (y=55) and the far gate (y=70.5) */
+#define CB_HOME_X    (rom_map() ? 7.0f : -25.0f)       /* BPC_ClericBeast_2 */
+#define CB_HOME_Y    (rom_map() ? 0.0f : 62.5f)       /* between the lantern (y=55) and the far gate (y=70.5) */
 static const BDef BD3[] = {            // the Cleric Beast
     {"SwipeL", 0, 3.6f, 6, 32, 0}, {"2HitComboL-R1", 0, 3.8f, 4, 30, 0}, {"2HitComboR-L1", 0, 3.8f, 4, 30, 0}, {"GroundPunchR", 0, 3.6f, 2, 38, 0},
     {"GroundSlapL", 0, 3.6f, 2, 34, 0}, {"GroundSlapLStepBack", 0, 3.4f, 1, 30, 0}, {"JumpSlam", 5.0f, 13, 2, 46, BF_GAP | BF_BODY}, {"Scream1", 0, 0.0f, 0, 0, 0}, {NULL}
+};
+static const BDef BDA[] = {            // the Amygdala (his own animations from make_amyg.py)
+    {"ArcaneBeam", 5.0f, 22.0f, 2, 0, BF_SHOOT | BF_PURE | BF_BEAM}, {"ClawFlurry", 0, 3.6f, 5, 24, 0}, {"WhipLash", 0, 7.0f, 3, 28, 0}, {"SpinSweep", 0, 4.0f, 3, 32, BF_BODY}, {"RearUpSlam", 0, 3.8f, 2, 44, 0},
+    {"LegStomp", 0, 4.5f, 2, 36, BF_BODY}, {"PalmSlam", 0, 4.2f, 3, 46, 0}, {"WideSweep", 0, 4.5f, 3, 34, 0}, {"HindStomp", 0, 4.5f, 3, 36, BF_BEHIND}, {"AcidVomit", 0, 2.0f, 3, 48, BF_BODY}, {"UnderGrab", 0, 2.0f, 3, 55, BF_BODY}, {"BackHop", 2.0f, 8.0f, 2, 0, BF_GAP | BF_RETREAT}, {"JumpSlam", 5.0f, 13, 2, 46, BF_GAP | BF_BODY}, {"Scream1", 0, 0.0f, 0, 0, 0}, {NULL}
+};
+static const BDef BDM[] = {            /* the Moon Presence (moon_moves): what the guide video shows, low on all fours, fast, lots of wide sweeps and dives, almost no waiting; his tendril sweeps reach further, the beam is rare */
+    {"ClawFlurry", 0, 4.2f, 6, 24, 0}, {"WhipLash", 0, 9.0f, 5, 28, 0}, {"SpinSweep", 0, 5.2f, 6, 32, BF_BODY}, {"WideSweep", 0, 5.8f, 6, 34, 0}, {"RearUpSlam", 0, 4.2f, 2, 44, 0},
+    {"PalmSlam", 0, 4.6f, 3, 46, 0}, {"JumpSlam", 3.0f, 15, 5, 46, BF_GAP | BF_BODY}, {"ArcaneBeam", 6.0f, 24.0f, 3, 0, BF_PURE | BF_ORB}, {"BackHop", 2.0f, 8.0f, 1, 0, BF_GAP | BF_RETREAT}, {"Scream1", 0, 0.0f, 0, 0, 0}, {NULL}      /* moon_unique: no beam (that is the Amygdala's): the same rearing-up now spits blood orbs */
+};
+static const BDef BDR[] = {            /* Rom (rom_fight): she has no claws to speak of. From afar the crystals rain down; anywhere, they burst from the ground under you while she lies on her back; close in, she rears and bursts, or throws her bulk about */
+    {"MeteorSlam", 9.0f, 80.0f, 5, 0, BF_PURE | BF_METEOR}, {"IceRoll", 0, 80.0f, 4, 0, BF_PURE | BF_ICE}, {"BlastSlam", 0, 8.0f, 6, 0, BF_PURE | BF_BLAST}, {"FlailCombo", 0, 6.5f, 3, 26, BF_BODY}, {NULL}
 };
 static const BDef BD4[] = {            // Gilbert on his table: only his arms reach
     {"Table1AtkL1", 0, 3.0f, 3, 30, 0}, {"Table1AtkR1", 0, 3.0f, 3, 30, 0}, {"Table2AtkL1", 0, 3.2f, 2, 36, 0}, {"Table2AtkR1", 0, 3.2f, 2, 36, 0}, {"Table2RoarL", 0, 9, 1, 0, 0}, {"Table2RoarR", 0, 9, 1, 0, 0}, {NULL}
@@ -11489,6 +12153,89 @@ static int cpick(const Char *c, const char *a) {                 // animation wh
 static int cwpick(const Char *c, const char *a) {
     for (uint32_t i = 0; i < c->nWA; i++) { const char *n = c->wanim[i].name, *u = strrchr(n, '_'); if (u) n = u + 1; if (!strcasecmp(n, a)) return (int)i; }
     return -1;
+}
+// ---- dream_amyg: from 16 insight an Amygdala crouches on the Hunter's Dream's roof. Stand too long on the spot he watches and he reaches down, lifts you up and the screen fades to black on the way to the Byrgenwerth arena.
+//      ux0:data/bbpsx/dream_amyg.txt = "px py pz yaw sx sy radius" (where he sits, the way he faces, the spot he watches and its radius) overrides the automatic placement; the choice is written to the maplog
+static float g_roofz = -1.0e9f, g_roofx, g_roofy, g_roofg[26][20];      // g_roofg: the highest drawn point in each 1 m cell of the house box, so the main roof (the height with the most area) can be told from a chimney
+static int g_roofg_ok;      // dream_amyg: the highest drawn vertex over the Dream's house (x 10..30, y -34..-8), found while the level is baked
+static int g_amg_dead = -1, g_amg_rez;      // the Amygdala has been killed (kept in amyg_dead.txt on the card); rez: a bloodstone chunk was offered at the grave, he is back after you leave the Dream and return
+static int amg_dead_get(void) { if (g_amg_dead < 0) g_amg_dead = file_exists_("ux0:data/bbpsx/amyg_dead.txt"); return g_amg_dead; }
+static void amg_dead_set(int v) { g_amg_dead = v; if (v) { FILE *f = fopen("ux0:data/bbpsx/amyg_dead.txt", "w"); if (f) { fputs("1\n", f); fclose(f); } } else remove("ux0:data/bbpsx/amyg_dead.txt"); }
+static float g_da_o[3];      // how far he has slid from his place to put his hand on your head
+static int g_da_state, g_da_hold, g_da_warn, g_da_cut, g_da_scr;      /* cut: the fade to the arena is a hard cut; scr: the scream has started */
+static int da_anim(void) { int a = cpick(&AMGC, "ArcaneBeam"); if (a < 0) a = cpick(&AMGC, "RearUpSlam"); if (a < 0) a = cpick(&AMGC, "Scream1"); return a; }      // state: 0 not set up, 1 perched, 2 lifting you, 3 fading out, 5 no roof found / switched off
+static float g_da_x, g_da_y, g_da_z, g_da_face, g_da_sx, g_da_sy, g_da_sz, g_da_sr = 2.4f, g_da_dw, g_da_t, g_da_gt, g_da_p0[3];
+static int g_da_test_c = -1, g_da_rom_c = -1; static float g_da_chk_t;      /* the card is only asked about these two files every 2 s, not every frame (a failed fopen on ux0 is slow) */
+static void da_chk(float dt) { g_da_chk_t -= dt; if (g_da_test_c < 0 || g_da_chk_t <= 0.0f) { g_da_chk_t = 2.0f; g_da_test_c = file_exists_("ux0:data/bbpsx/dream_amyg_test.txt"); g_da_rom_c = file_exists_("ux0:data/bbpsx/level_romarena.bin"); } }
+static int da_ok(void) { if (g_da_test_c < 0) da_chk(0.0f); return !strcasecmp(cur_map, "huntersdream") && g_amg_have && !amg_dead_get() && (g_insight >= 15 || g_da_test_c) && g_da_rom_c; }      // (dream_amyg_test.txt, any contents: skips the insight needed, for testing)
+static void da_setup(const Player *pl, float pface) {
+    int got = 0; FILE *f = fopen("ux0:data/bbpsx/dream_amyg_front.txt", "r");      // dream_amyg_front.txt ("3.5" = how far, default 3.5 m): he stands that far in front of where you were standing and facing when the Dream loaded (on the other side of the gate), the spot you stood on is the pick-up zone
+    if (f) { float D = 3.5f; if (fscanf(f, "%f", &D) != 1 || D < 1.0f || D > 15.0f) D = 3.5f; fclose(f); g_da_x = pl->x + cosf(pface) * D; g_da_y = pl->y + sinf(pface) * D; g_da_z = pl->z; g_da_face = pface + 3.14159265f; g_da_sx = pl->x; g_da_sy = pl->y; g_da_sz = pl->z; g_da_sr = 2.4f; got = 2; }
+    if (!got) f = fopen("ux0:data/bbpsx/dream_amyg.txt", "r");
+    if (!got && f) { float v[7]; if (fscanf(f, "%f %f %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]) == 7) { g_da_x = v[0]; g_da_y = v[1]; g_da_z = v[2]; g_da_face = v[3]; g_da_sx = v[4]; g_da_sy = v[5]; g_da_sr = v[6]; got = 1; float gz_ = v[2]; if (!cw_floor(&world, v[4], v[5], v[2] + 1.0f, &gz_)) gz_ = v[2]; if (fabsf(gz_ - v[2]) > 3.0f) gz_ = v[2]; g_da_sz = gz_; /* the floor under the spot, searched from just above his own height (not below it: that found the ground floor under a balcony) */ } fclose(f); }
+    if (!got) {      // the roof: the highest point over the house (a column at least 3 m taller than the ground under it); he sits on its top
+        float bx = 0.0f, by = 0.0f, bz = -1.0e9f;
+        if (g_roofg_ok) {      // the main roof: the height (0.5 m bins, above the 6.5 m balconies) most cells top out at; he sits on the cell of that band nearest its middle, so a chimney (the highest point, but a cell or two) is ignored
+            int hist[80] = { 0 }; for (int i = 0; i < 26; i++) for (int j = 0; j < 20; j++) { float z = g_roofg[i][j]; if (z > 7.0f && z < 47.0f) hist[(int)((z - 7.0f) * 2.0f)]++; }
+            int bi = -1, bn = 0, mx_ = 0; for (int k = 0; k < 80; k++) { int n = hist[k] + (k > 0 ? hist[k - 1] : 0) + (k < 79 ? hist[k + 1] : 0); if (n > mx_) mx_ = n; }
+            { int need_ = mx_ * 2 / 5 > 6 ? mx_ * 2 / 5 : 6; for (int k = 79; k >= 0; k--) { int n = hist[k] + (k > 0 ? hist[k - 1] : 0) + (k < 79 ? hist[k + 1] : 0); if (n >= need_) { bn = n; bi = k; break; } } }      // the HIGHEST height that still covers a good share of the house (the balconies below it have more cells, a chimney far fewer)
+            { char t_[200]; int p_ = 0; p_ += snprintf(t_ + p_, sizeof t_ - p_, "dream_amyg: roof heights (cells per 0.5 m from 7 m):"); for (int k = 0; k < 80 && p_ < 170; k++) if (hist[k]) p_ += snprintf(t_ + p_, sizeof t_ - p_, " %.1f=%d", 7.0f + 0.5f * k, hist[k]); maplog("%s%s", t_, ""); }
+            if (bi >= 0 && bn >= 6) { float lo = 7.0f + 0.5f * (bi - 1), hi = 7.0f + 0.5f * (bi + 2), cx = 0.0f, cy = 0.0f; int cn = 0;
+                for (int i = 0; i < 26; i++) for (int j = 0; j < 20; j++) { float z = g_roofg[i][j]; if (z >= lo && z < hi) { cx += 10.5f + j; cy += -33.5f + i; cn++; } }
+                cx /= cn; cy /= cn; float bd = 1.0e9f; for (int i = 0; i < 26; i++) for (int j = 0; j < 20; j++) { float z = g_roofg[i][j]; if (z >= lo && z < hi) { float d = hypotf(10.5f + j - cx, -33.5f + i - cy); if (d < bd) { bd = d; bx = 10.5f + j; by = -33.5f + i; bz = z; } } }
+                char t_[120]; snprintf(t_, sizeof t_, "dream_amyg: main roof %d cells at z %.1f-%.1f (highest point %.1f is a chimney or the like)", cn, lo, hi, g_roofz); maplog("%s%s", t_, ""); } }
+        if (bz < -1.0e8f && g_roofz > 2.0f) { bx = g_roofx; by = g_roofy; bz = g_roofz; { char t_[100]; snprintf(t_, sizeof t_, "dream_amyg: roof top of the drawn level at %.1f %.1f %.1f", bx, by, bz); maplog("%s%s", t_, ""); } }
+        if (bz < -1.0e8f) for (float x = 10.0f; x <= 30.0f; x += 1.0f) for (float y = -32.0f; y <= -14.0f; y += 1.0f) {
+            float top, low; if (!cw_floor(&world, x, y, 60.0f, &top)) continue; if (!cw_floor(&world, x, y, 1.5f, &low)) low = top;
+            if (top - low < 3.0f) continue; if (top > bz) { bz = top; bx = x; by = y; } }
+        if (bz < -1.0e8f) for (float x = -60.0f; x <= 60.0f; x += 2.0f) for (float y = -60.0f; y <= 60.0f; y += 2.0f) {      // not over the guessed house: the tallest building column anywhere in the Dream
+            float top, low; if (!cw_floor(&world, x, y, 60.0f, &top)) continue; if (!cw_floor(&world, x, y, 1.5f, &low)) low = top;
+            if (top - low < 3.0f || top - low > 25.0f) continue; if (top > bz) { bz = top; bx = x; by = y; } }
+        if (bz < -1.0e8f) { g_da_state = 5; maplog("dream_amyg: no roof found (put dream_amyg.txt in ux0:data/bbpsx/)%s%s", "", ""); return; }
+        float dx = DREAM_STONES[1][0] - bx, dy = DREAM_STONES[1][1] - by, l = hypotf(dx, dy); if (l < 0.1f) { dx = 1.0f; dy = 0.0f; l = 1.0f; } dx /= l; dy /= l;
+        g_da_x = bx; g_da_y = by; g_da_z = bz - 0.15f; g_da_face = atan2f(dy, dx);
+        int ok_ = 0; for (float d = 5.0f; d <= 14.0f && !ok_; d += 1.0f) { float sx = bx + dx * d, sy = by + dy * d, gz; if (cw_floor(&world, sx, sy, bz - 1.0f, &gz) && gz < bz - 1.5f && cw_floor(&world, sx, sy, gz + 1.5f, &gz)) { g_da_sx = sx; g_da_sy = sy; g_da_sz = gz; ok_ = 1; } }
+        if (!ok_) { g_da_sx = bx + dx * 6.0f; g_da_sy = by + dy * 6.0f; float gz = 0.0f; if (!cw_floor(&world, g_da_sx, g_da_sy, bz + 0.5f, &gz) && !cw_floor(&world, g_da_sx, g_da_sy, 60.0f, &gz)) gz = 0.0f; g_da_sz = gz; }      // (no clear ground at 5..14 m: the floor right under the 6 m mark, wherever it is)
+        g_da_sr = 2.4f;
+    }
+    g_da_state = 1; g_da_dw = 0.0f; g_da_t = 0.0f; g_da_warn = 0; g_da_o[0] = g_da_o[1] = g_da_o[2] = 0.0f;
+    { char t_[160]; snprintf(t_, sizeof t_, "dream_amyg: perch %.1f %.1f %.1f, watches %.1f %.1f r%.1f%s", g_da_x, g_da_y, g_da_z, g_da_sx, g_da_sy, g_da_sr, got == 2 ? " (in front of you)" : got ? " (file)" : ""); maplog("%s%s", t_, ""); }
+}
+static void da_hand(float *x, float *y, float *z) {      // where his two hands are (the mean of the posed hand_r / hand_l attachments)
+    const Char *c = &AMGC; if (!c->pose || c->nAt < 2) { *x = g_da_x + g_da_o[0]; *y = g_da_y + g_da_o[1]; *z = g_da_z + g_da_o[2]; return; }
+    const float *a = c->pose + (size_t)c->nB * 12; float lx = a[3], ly = a[7], lz = a[11];      // hand_r
+    float cs = cosf(g_da_face), sn = sinf(g_da_face); *x = g_da_x + g_da_o[0] + cs * lx - sn * ly; *y = g_da_y + g_da_o[1] + sn * lx + cs * ly; *z = g_da_z + g_da_o[2] + lz;
+}
+static int da_update(float dt, Player *pl, int busy, float pface) {      // returns 1 on the frame the fade to the arena should start
+    if (strcasecmp(cur_map, "huntersdream")) { g_da_state = 0; g_da_hold = 0; g_da_dw = 0.0f; g_da_cut = 0; g_da_scr = 0; if (g_amg_rez) { amg_dead_set(0); g_amg_rez = 0; } return 0; }      // (left the Dream after the chunk: he is back when you return)
+    if (g_da_state == 0) {
+        da_chk(dt); static int why_ = -1; int w_ = !g_amg_have ? 1 : amg_dead_get() ? 4 : (g_insight < 15 && !g_da_test_c) ? 2 : !g_da_rom_c ? 3 : 0;
+        if (w_ != why_) { why_ = w_; char t_[120]; snprintf(t_, sizeof t_, "dream_amyg: waiting (%s) insight=%d", w_ == 1 ? "amyg.bin not loaded" : w_ == 2 ? "needs 15 insight" : w_ == 3 ? "level_romarena.bin missing" : w_ == 4 ? "the Amygdala was killed: offer a bloodstone chunk at the grave, then leave and return" : "ready", g_insight); maplog("%s%s", t_, ""); }
+        if (!da_ok() || g_rush || g_hd_wait || g_cut_t >= 0.0f) return 0; da_setup(pl, pface); return 0; }
+    if (g_da_state == 5) return 0;
+    g_da_t += dt;
+    if (g_da_state == 1) {
+        float want = atan2f(pl->y - g_da_y, pl->x - g_da_x); turn_to(&g_da_face, want, 0.9f * dt);
+        int in_ = !busy && hypotf(pl->x - g_da_sx, pl->y - g_da_sy) < g_da_sr && fabsf(pl->z - g_da_sz) < 3.0f;
+        g_da_dw = in_ ? g_da_dw + dt : fmaxf(0.0f, g_da_dw - 2.0f * dt);
+        if (g_da_dw > 2.0f) g_da_warn = 1;
+        if (g_da_dw < 0.5f) g_da_warn = 0;
+        if (g_da_dw >= 5.0f) { g_da_state = 2; g_da_gt = 0.0f; g_da_t = 0.0f; g_da_hold = 1; g_da_scr = 0; g_da_cut = 0; g_da_o[0] = g_da_o[1] = g_da_o[2] = 0.0f; g_da_p0[0] = pl->x; g_da_p0[1] = pl->y; g_da_p0[2] = pl->z; g_da_face = atan2f(pl->y - g_da_y, pl->x - g_da_x); }
+    } else if (g_da_state == 2 || g_da_state == 3) {      /* he rears up like for the arcane beam, screams and shakes the screen, then the picture cuts to black for Byrgenwerth (you stay where you stand) */
+        g_da_gt += dt; { int ai_ = da_anim(); float T_ = 2.4f; if (ai_ >= 0) { const HAnim *a_ = &AMGC.anim[ai_]; T_ = a_->nf / (a_->fps > 1.0f ? a_->fps : 30.0f); } if (T_ < 1.5f) T_ = 1.5f; if (T_ > 4.0f) T_ = 4.0f;
+            if (g_da_state == 2 && g_da_gt >= 0.3f * T_ && !g_da_scr) { g_da_scr = 1; snd_play_at(S_CB_HOWL, g_da_x, g_da_y, 2.2f); snd_play_at_p(S_BOSS_YELL, g_da_x, g_da_y, 2.0f, 0.6f); }
+            if (g_da_state == 2 && g_da_gt >= 0.3f * T_ && g_da_gt < 0.85f * T_) { g_vshake = 0; float r_ = (g_da_gt - 0.3f * T_) / (0.15f * T_); r_ = r_ > 1.0f ? 1.0f : r_; float v_ = (0.45f + 0.55f * r_) * (0.8f + 0.2f * sinf(g_da_gt * 38.0f)); if (g_shake < v_) g_shake = v_; }
+            if (g_da_state == 2 && g_da_gt >= 0.85f * T_) { g_da_state = 3; g_da_cut = 1; } }
+        if (g_da_state == 3) return 1;      /* (asks every frame until the cut has really started) */
+    }
+    return 0;
+}
+static void da_draw(const PS1Shader *sh, const float *pv, float px, float py) {
+    if (g_da_state < 1 || g_da_state == 5 || !g_amg_have) return;
+    if (fabsf(g_da_x - px) + fabsf(g_da_y - py) > FOG_END + 12.0f) return;
+    Char *sv = CUR; CUR = &AMGC; int ai = g_da_state >= 2 ? da_anim() : cpick(&AMGC, "Idle"); if (ai < 0) ai = 0;
+    const HAnim *an = &AMGC.anim[ai]; float dur = an->nf / (an->fps > 1.0f ? an->fps : 30.0f), t = g_da_state >= 2 ? (g_da_t < dur ? g_da_t : dur) : fmodf(g_da_t, dur);
+    hunter_pose(ai, t, -1, 0.0f, 0.0f); hunter_skin(); draw_hunter_ps1(sh, pv, g_da_x + g_da_o[0], g_da_y + g_da_o[1], g_da_z + g_da_o[2], g_da_face); CUR = sv;
 }
 // fill in a move from its animation: length, travel, the hit windows (frames where the hand is fastest) and the moment of the shot
 static void bm_fill(BMove *m, const Char *c, int a, int fl) {
@@ -11597,8 +12344,10 @@ static void boss_init(void) {
     Enemy *E = &PROTO[3]; E->type = 4; E->hp_max = BOSS_HP; E->aggro = BOSS_TRIGGER; E->reach = 2.5f; E->dmg = 0.0f; E->stop = 1.6f; E->atk_rate = 1.0f; E->loco_rate = 1.0f; E->yaw_off = 0.0f; E->cfg_always_run = 1;
     E->cz = 1.3f; E->bod = 0.9f; E->hrad = 0.55f; E->zlo = 0.0f; E->zhi = 2.0f;
 }
+static int g_amyg_on;      // (defined again further down: one tentative definition)
+static float moon_scale(void) { static float v_ = -1.0f; if (v_ < 0.0f) { v_ = 1.65f; FILE *f_ = fopen("ux0:data/bbpsx/moon_scale.txt", "r"); if (f_) { float t_; if (fscanf(f_, "%f", &t_) == 1 && t_ >= 0.5f && t_ <= 4.0f) v_ = t_; fclose(f_); } } return v_; }      /* moon_scale: how big the Moon Presence is next to you, as in the guide video (moon_scale.txt = one number overrides, 1.0 is the size the model file has) */
 static void cb_init(void) {
-    Char *C = &CBC; C->scale = 1.0f;
+    Char *C = cb_char(); C->scale = moon_map() && g_moon_have ? moon_scale() : 1.0f;
     Enemy *E = &PROTO[3];
     if (E->type != 4) { E->type = 4; E->hp_max = CB_HP; E->aggro = BOSS_TRIGGER; E->reach = 2.5f; E->dmg = 0.0f; E->stop = 1.6f; E->atk_rate = 1.0f; E->loco_rate = 1.0f; E->yaw_off = 0.0f; E->cfg_always_run = 1; E->cz = 1.8f; E->bod = 1.4f; E->hrad = 1.0f; E->zlo = 0.0f; E->zhi = 3.2f; }
     BPhase *P = &BPH[3]; memset(P, 0, sizeof *P); P->c = C;
@@ -11607,9 +12356,12 @@ static void cb_init(void) {
     for (int k = 0; k < 5; k++) { int a = cpick(C, hn[k]); if (a >= 0) P->hurt[P->nhurt++] = a; }
     P->counter = cpick(C, "CounteredStart"); P->visc = cpick(C, "Visceral"); P->death = cpick(C, "Death");
     P->trans = P->trans2 = -1; P->w_closed = P->w_open = P->w_unfold = -1;
-    P->runv = (P->run >= 0 ? anim_speed(C, P->run, 5.0f) : 5.0f) * 1.1f;
+    P->runv = (P->run >= 0 ? anim_speed(C, P->run, 5.0f) : 5.0f) * (moon_map() ? 1.3f : 1.1f);
     P->bod = 1.4f; P->hrad = 1.0f; P->zlo = 0.0f; P->zhi = 3.2f; P->cz = 1.8f;
-    bphase_build(P, BD3); bphase_strikes(P);
+    if (g_amyg_on) { P->bod = 2.0f; P->hrad = 1.5f; P->zhi = 3.8f; if (moon_map()) { P->bod = 2.2f; P->hrad = 1.5f; P->zhi = 4.8f; P->cz = 2.2f; }      /* he is turned to lie forward over the water now: long and low, with the tails trailing behind */ }      // amyg_body: the Amygdala's body is about 4 m across (the Cleric Beast's boxes were far too small for it)
+    if (rl_map() && g_rom_have) { P->bod = 3.2f; P->hrad = 2.8f; P->zhi = 5.4f; P->cz = 2.4f; P->runv = 0.9f; }      /* rom_fight: she is 10 m long and barely crawls */
+    bphase_build(P, (rl_map() && g_rom_have) ? BDR : (moon_map() && g_moon_have ? BDM : (cpick(C, "RearUpSlam") >= 0 ? BDA : BD3))); bphase_strikes(P); if (rom_map() && !moon_map() && !rl_map() && g_amyg_on) { if (!g_amg_arms) P->trans = cpick(C, "ArmTear"); else for (int k_ = 0; k_ < P->n; k_++) if (!(P->m[k_].fl & (BF_BEAM | BF_RETREAT | BF_SHOOT))) { P->m[k_].dmax *= 1.3f; P->m[k_].dmg *= 1.2f; } }      /* arm_tear: the animation that tears them off; afterwards his blows reach further and hit harder */
+    if (moon_map() && g_moon_have) { float ms_ = moon_scale(); P->trans = cpick(C, "Scream1"); P->bod *= ms_; P->hrad *= ms_; P->zhi *= ms_; P->cz *= ms_; for (int k_ = 0; k_ < P->n; k_++) { P->m[k_].dmax *= ms_; if (!(P->m[k_].fl & BF_GAP)) P->m[k_].dmin *= ms_; } }      /* moon_arena: the roar that changes his form */
     {   // lock-on points: the head (the bone carrying the highest vertices) and the two legs (the bones carrying the lowest)
         float zmin = 1e9f, zmax = -1e9f; for (uint32_t v = 0; v < C->nV; v++) { float z = C->rest[v * 5 + 2]; if (z < zmin) zmin = z; if (z > zmax) zmax = z; }
         int cnt[256], cl[256]; memset(cnt, 0, sizeof cnt); memset(cl, 0, sizeof cl);
@@ -11663,36 +12415,44 @@ static void gh_init(void) {      // gehrman_boss: his model must carry the same 
         && ((cwpick(C, "IdleUnTrans") == BPH[0].w_closed && cwpick(C, "IdleTrans") == BPH[0].w_open && cwpick(C, "2HTransForm") == BPH[0].w_unfold) || (cwpick(C, "open") >= 0 && cwpick(C, "IdleUnTrans") < 0));      // gh_spear: or he carries the blood spear (its own animation names)
     g_gh_spear = same && cwpick(C, "open") >= 0 && cwpick(C, "IdleUnTrans") < 0;
     if (g_gh_spear) { int o_ = cwpick(C, "open"); const WAnim *w_ = &C->wanim[o_]; uint32_t fr_[3] = { 0, w_->nf / 2, w_->nf - 1 }; for (int q_ = 0; q_ < 3; q_++) { const float *m_ = w_->m + (size_t)fr_[q_] * 18; char t_[220]; snprintf(t_, sizeof t_, "spear open f%u/%u fps %.1f: %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f | %.3f %.3f %.3f %.3f", (unsigned)fr_[q_], (unsigned)w_->nf, w_->fps, m_[0], m_[1], m_[2], m_[3], m_[4], m_[5], m_[6], m_[7], m_[8], m_[9], m_[10], m_[11]); maplog("%s%s", t_, ""); } }      // spear_log: the blade matrix at the start / middle / end of the open animation
-    { FILE *f_ = fopen("ux0:data/bbpsx/gh_half.txt", "r"); if (f_) { float v_; if (fscanf(f_, "%f", &v_) == 1 && v_ >= 0.0f && v_ <= 1.0f) { g_gh_half = v_; if (fscanf(f_, "%f %f %f", &g_gh_boff[0], &g_gh_boff[1], &g_gh_boff[2]) == 3) fscanf(f_, "%f %f %f %f %f %f", &g_wadj[0], &g_wadj[1], &g_wadj[2], &g_wadj[3], &g_wadj[4], &g_wadj[5]); } fclose(f_); } }      // gh_half.txt: how far the spear unfolds, 0..1
+    if (g_gh_spear) { int o2_ = cwpick(C, "open"); if (o2_ >= 0 && strstr(C->wanim[o2_].name, "Burial")) g_gh_half = 1.0f; }      // the Burial Blade (make_scythe.py) opens all the way into the scythe
+    { FILE *f_ = fopen("ux0:data/bbpsx/gh_grip.txt", "r"); if (f_) { float a_, b_, c_; int n_ = fscanf(f_, "%f %f %f", &a_, &b_, &c_); if (n_ >= 1) g_gh_grip = a_; if (n_ >= 2) g_tip_off = b_; if (n_ >= 3) g_sw_pitch = c_; fclose(f_); } }      /* gh_grip.txt: "grip_cm tip_turn_deg" (cm the hand sits up the haft toward the blade in sword mode; extra turn of the blade in a swing) */
+    { FILE *f_ = fopen("ux0:data/bbpsx/gh_half.txt", "r"); if (f_) { float v_; if (fscanf(f_, "%f", &v_) == 1 && v_ >= 0.0f && v_ <= 1.0f) { g_gh_half = v_; if (fscanf(f_, "%f %f %f", &g_gh_boff[0], &g_gh_boff[1], &g_gh_boff[2]) == 3) fscanf(f_, "%f %f %f %f %f %f", &g_wadj[0], &g_wadj[1], &g_wadj[2], &g_wadj[3], &g_wadj[4], &g_wadj[5]); } fclose(f_); if (!file_exists_("ux0:data/bbpsx/gh_keepadj.txt")) { for (int i_ = 0; i_ < 3; i_++) g_gh_boff[i_] = 0.0f; for (int i_ = 0; i_ < 6; i_++) g_wadj[i_] = 0.0f; maplog("gh_half.txt: its old spear offsets are ignored (the scythe is placed by the grip fix); gh_keepadj.txt brings them back%s%s", "", ""); } } }      // gh_half.txt: how far the spear unfolds, 0..1
     if (same && BPH[1].death < 0 && BPH[1].visc >= 0) BPH[1].death = BPH[1].visc;      // he has no death of his own: he goes down like a visceraled man
     gh_ok = same;
+    maplog("build: gehrman sword diagnostics v2%s%s", "", "");
+    maplog("build: 2026-11-20y Workshop note; 2026-11-20x fps cap measured in time (30 and 24 now read right on a counter); 2026-11-20w Amygdala added blood switched off; 2026-11-20v crater listed in new game plus only when earned this run; 2026-11-20u new game plus hides Forbidden Woods Crater and Moonlit Water on the travel list; 2026-11-20t sick room panels baked (first floor now has two); 2026-11-20s purple-eyed poison rats in the blood moon; 2026-11-20r motion blur row, one fog distance (60), blood moon tiers and extras; 2026-11-20q The Doll's voice slots (doll_1..13), Hunter's Dream soundtrack (mus_hd3.wav then mus_hd.wav; once the house burns only mus_gehrman.wav, in his fight), Rom's lake has the Amygdala arena's mist, Moon Presence (never in a boss rush) hangs in the blood moon (moonpres.bin flip-book, only after Gehrman and the Amygdala), chapel note shortened, new game starts clean (no old story, no moon arena), Rom fight: children skin less often, rom prof line, chapel gate shut in a rush, left hand lets go to heal, reaches the hilt, moon sword glow on blade, swipe both ways, no arena lanterns in a boss rush, chapel gate v4, Gehrman Oedon line, Byrgenwerth travel, left-hand IK fix, moon attack list%s%s", "", "");      /* (a marker, so a log shows which build it came from) */
     { char t[160]; snprintf(t, sizeof t, "gehrman: idle %d run %d trans %d, animations %s Gascoigne's, ok=%d", cpick(C, "Idle1H"), cpick(C, "Run1H"), cpick(C, "2HTransform"), same ? "match" : "DO NOT match", gh_ok); maplog("%s%s", t, ""); }
 }
 static void boss_stats(void) {                                   // body numbers and animation slots of the current phase
     const BPhase *P = &BPH[BS.phase];
-    EN.bod = P->bod; EN.hrad = P->hrad; EN.zlo = P->zlo; EN.zhi = P->zhi; EN.cz = P->cz; EN.run_v = EN.walk_v = P->runv; EN.a_idle = P->idle; EN.a_run = EN.a_walk = P->run;
+    EN.bod = P->bod; EN.hrad = P->hrad; EN.zlo = P->zlo; EN.zhi = P->zhi; EN.cz = P->cz; EN.run_v = EN.walk_v = P->runv * ((g_lb_broke & 8) ? 0.72f : 1.0f); EN.a_idle = P->idle;      /* limb_break: broken legs slow him */ EN.a_run = EN.a_walk = P->run;
 }
 static void boss_swap_char(const Char *src) {                    // give the boss another model; its pose buffers are its own
     Char *c = &EN.ch;
-    free(c->skinned); free(c->pose); free(c->tmp);
-    *c = *src; c->wset = 0; c->show_alt = 0; c->show_pistol = 0; c->hide_w = 0; c->tipR = c->tipL = 0;
+    free(c->skinned); free(c->pose); free(c->tmp); free(c->limp);
+    *c = *src; c->limp = NULL; limb_reset(); c->wset = 0; c->show_alt = 0; c->show_pistol = 0; c->hide_w = 0; c->tipR = c->tipL = 0;
     size_t per = (size_t)(c->nB + c->nAt) * 12;
     c->skinned = malloc((size_t)c->nV * 5 * sizeof(float)); memcpy(c->skinned, c->rest, (size_t)c->nV * 5 * sizeof(float));
     c->pose = malloc(per * sizeof(float)); c->tmp = malloc(per * sizeof(float));
     EN.a_prev = -1; EN.blend = 0.0f;
 }
 static void lamps_gate(void) {                                  // the arena's lantern doesn't exist until Gascoigne is dead
-    int hide = (boss_ok && GAS_ALIVE && !strcasecmp(cur_map, "gascoignearena")) || (cb_ok && CB_ALIVE && cb_map()) || (gb_ok && GB_ALIVE && gb_map());
+    int hide = (boss_ok && GAS_ALIVE && !strcasecmp(cur_map, "gascoignearena")) || (cb_ok && CB_ALIVE && cb_map() && !rom_map()) || (gb_ok && GB_ALIVE && gb_map()) || (rl_map() && !(g_story & 4)) || (g_rush && strcasecmp(cur_map, "huntersdream") != 0);      /* rom_lake: no lantern in her lake until she is dead; boss_rush: no lantern in any arena at all */
     if (hide && nLamps) { lamp_hidden = nLamps; nLamps = 0; }
     else if (!hide && lamp_hidden && !nLamps) { nLamps = lamp_hidden; lamp_hidden = 0; }
 }
 static void boss_reset(void) {                                   // ECUR = the boss: back to his spot, full health, human form, waiting
     music_boss(-1);
+    if (moon_map() && g_moon_have && g_moon_form != g_moon_start) { g_moon_form = g_moon_start; cb_init(); }      /* moon_arena: a new attempt starts in the form you chose */
+    ast_reset(); moon_fx_reset(); rom_reset(); g_mp_drain = g_mp_drain_req = 0; g_mp_drain_cd = 0.0f; g_mp_open_t = 0.0f; if (g_amg_arms) { g_amg_arms = g_amg_arms_m = 0; if (cb_map()) cb_init(); }      /* real_feel: a new attempt starts clean */
     int cl = cb_map(), gbm = gb_map(), ghm = gh_map();
     if (ghm ? !GH_ALIVE : (gbm ? !GB_ALIVE : (cl ? !CB_ALIVE : !GAS_ALIVE))) return;                    // dead for good
     BS.idx = (int)(ECUR - ENS);
-    { const Char *wc = ghm ? &GEHC : (gbm ? &GILC : (cl ? &CBC : &PROTO[3].ch)); if (EN.ch.nB != wc->nB || EN.ch.rest != wc->rest) boss_swap_char(wc); }
-    g_gh_torch = 0; g_gb_healed = 0; g_gbt_done = 0; g_mbox_used = 0; BS.phase = gbm ? 4 : (cl ? 3 : 0); BS.sub = SUB_WAIT; BS.fight = 0; BS.stage = 0; BS.pend = 0; BS.poise = 0.0f; BS.armor = 0.0f; BS.dead_done = 0; BS.gone = 0; BS.nostag = 0; BS.vis = 1.0f; BS.mv = 0; BS.last_mv = -1; BS.shot_done = 0;
+    { const Char *wc = ghm ? &GEHC : (gbm ? &GILC : (cl ? cb_char() : &PROTO[3].ch)); if (EN.ch.nB != wc->nB || EN.ch.rest != wc->rest) boss_swap_char(wc); EN.ch.scale = wc->scale; }      /* moon_scale: a boss that already wears this model still takes the size cb_init has just set */
+    { static int tb_ = 0; int want_ = (ghm && gh_ok) ? 1 : 0; if (want_ != tb_ && boss_ok) { tb_ = want_; bphase_build(&BPH[0], want_ ? GH0 : BD0); bphase_build(&BPH[1], want_ ? GH1 : BD1); { char t_[80]; snprintf(t_, sizeof t_, "boss moves swapped: %d/%d (%s)", BPH[0].n, BPH[1].n, want_ ? "gehrman" : "gascoigne"); maplog("%s%s", t_, ""); } } }      // gh_redo: his own move tables (Gascoigne's stay as they were)
+    gh_fx_reset(); limb_reset();
+    g_gh_dying = 0; g_gh_torch = 0; g_gb_healed = 0; g_gbt_done = 0; g_mbox_used = 0; BS.phase = gbm ? 4 : (cl ? 3 : 0); BS.sub = SUB_WAIT; BS.fight = 0; BS.stage = 0; BS.pend = 0; BS.poise = 0.0f; BS.armor = 0.0f; BS.dead_done = 0; BS.gone = 0; BS.nostag = 0; BS.vis = 1.0f; BS.mv = 0; BS.last_mv = -1; BS.shot_done = 0;
     float gz; EN.placed = 1;
     EN.p.x = EN.hx; EN.p.y = EN.hy; EN.p.z = gbm ? GB_Z_SIT : (cw_floor(&world, EN.hx, EN.hy, EN.hz + 1.0f, &gz) ? gz : EN.hz - 1.05f); EN.p.vz = 0.0f; EN.p.grounded = 0;
     g_cb_hide = 0; g_cb_intro = 0; if (cl && g_cb_hide_ok) { float hz_ = 0.0f; if (!cw_floor(&world, CB_HOME_X, CB_HOME_Y, EN.hz + 1.0f, &hz_)) hz_ = EN.hz - 1.05f; g_cb_z0 = hz_; EN.p.z = hz_; EN.p.grounded = 1; g_cb_hide = 1; }      // cb_intro: out of sight behind the wall until you walk in
@@ -11707,7 +12467,7 @@ static int boss_parryable(void) {
 }
 static void boss_stagger(void) {                                 // a well-timed shot into a swing
     if (!en_ok || EN.state == E_DEAD || BS.sub == SUB_TRANS || BS.sub == SUB_DEAD || BS.nostag) return;      // after a visceral he can't be staggered again until he has made an attack
-    EN.visc_used = 0;
+    EN.visc_used = 0; cine_slow(0.28f, 0.3f);      /* boss_cine: the parry freezes the moment */
     g_pvisc_abort = 1; snd_play_at(cb_map() ? S_CB_HOWL : S_BOSS_GROWL, EN.p.x, EN.p.y, 1.2f);       // staggered: he growls
     BS.sub = SUB_STAG; EN.state = E_HURT; EN.stagger = 1; EN.st = 0.0f; EN.sdur = gh_map() ? STAGGER_TIME * 0.65f : STAGGER_TIME; EN.vx = EN.vy = 0.0f; EN.hits = 0; ENEMY.show_pistol = 0;      /* gh_hard: a shorter opening for Gehrman */
     en_play(BPH[BS.phase].counter, 0.06f, 1);
@@ -11722,6 +12482,7 @@ static int boss_musicbox(void) {      // music_box: playing the music box at the
 static void boss_visc(void) {                                    // the visceral attack landed: he's on the ground for its length
     const BPhase *P = &BPH[BS.phase];
     if (EN.state == E_DEAD || P->visc < 0) return;
+    cine_slow(0.5f, 0.32f); if (g_shake < 0.7f) g_shake = 0.7f;      /* boss_cine: the visceral tears through in slow motion */
     if (BS.phase >= 2) snd_play_at(cb_map() ? S_CB_HURT : S_BOSS_BEAST, EN.p.x, EN.p.y, 1.2f);
     else { snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 2.0f, 0.74f); snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 1.6f, 0.88f); }       // two pained cries, pitched down and layered: deeper and longer       // he screams as the blade goes in
     BS.nostag = 1;
@@ -11729,26 +12490,151 @@ static void boss_visc(void) {                                    // the visceral
     BS.sub = SUB_STAG; EN.state = E_HURT; EN.stagger = 1; EN.st = 0.0f; EN.sdur = len; EN.vx = EN.vy = 0.0f;
     en_play(P->visc, 0.08f, 1);
 }
+
+/* ---- limb_break: the Cleric Beast, the Amygdala and the Moon Presence have limbs that break. Each limb has its own health; your blows go to the limb your blade is at
+   (shots and other hits: the limb you stand nearest, at half strength). A broken limb staggers him, hangs limp, takes more damage from then on and weakens what he does with it. */
+static float g_lb_thp[40]; static int g_lb_tail = -1;      /* each tail has its own health, but only ONE tail can ever be broken in a fight: g_lb_tail = which */
+static const char *g_lb_name[5] = { "RIGHT ARM", "LEFT ARM", "HEAD", "LEGS", "TAIL" };
+static int limb_on(void) { return en_ok && EN.type == 4 && cb_map() && !gb_map(); }
+static float limb_max(int k) { static const float f_[5] = { 0.11f, 0.11f, 0.10f, 0.13f, 0.11f }; return EN.hp_max * f_[k]; }
+static void limb_reset(void) { for (int k = 0; k < 40; k++) g_lb_thp[k] = -1.0f; g_lb_tail = -1; for (int k = 0; k < 5; k++) g_lb_hp[k] = -1.0f; g_lb_broke = 0; g_lb_req = 0; g_lb_pt_ok = 0; if (ECUR && ENEMY.limp) { free(ENEMY.limp); ENEMY.limp = NULL; } }
+static float limb_atk_k(void) { if (!limb_on()) return 1.0f; return 1.0f - 0.15f * ((g_lb_broke & 1) + ((g_lb_broke >> 1) & 1)); }      /* each broken arm: his blows hit 15% softer */
+/* cb_bones: the Cleric Beast has the game's real skeleton, and his model file carries where his hand_r, hand_l, head and spine_2 bones are in every frame. So on him a limb is the real limb: your blade has to be at that arm (anywhere from the shoulder to the claws) or at the head; low hits go to the legs, and the rest is his body, which breaks nothing */
+static int cb_real(void) { return en_ok && EN.type == 4 && cb_map() && !rom_map() && ENEMY.pose && ENEMY.nAt >= 4; }
+static void cb_att_m(int k, float *o) { const float *m = ENEMY.pose + (size_t)(ENEMY.nB + k) * 12; float sc_ = ENEMY.scale > 0.0f ? ENEMY.scale : 1.0f; o[0] = m[3] * sc_; o[1] = m[7] * sc_; o[2] = m[11] * sc_; }      /* model space (x forward, z up) */
+static void cb_att_w(int k, float *o) { float q[3]; cb_att_m(k, q); float cs = cosf(EN.face), sn = sinf(EN.face); o[0] = EN.p.x + cs * q[0] - sn * q[1]; o[1] = EN.p.y + sn * q[0] + cs * q[1]; o[2] = EN.p.z + q[2]; }
+static float cb_seg_d(const float *p, const float *a, const float *b, float *t_out) {      /* distance from p to the line a-b, and how far along it (0 = a, 1 = b; may run to 1.3: the claws reach past the hand bone) */
+    float d[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, w[3] = { p[0] - a[0], p[1] - a[1], p[2] - a[2] }, l2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+    float t = l2 > 1e-6f ? (w[0] * d[0] + w[1] * d[1] + w[2] * d[2]) / l2 : 0.0f; if (t < 0.0f) t = 0.0f; if (t > 1.3f) t = 1.3f;
+    float ex = w[0] - d[0] * t, ey = w[1] - d[1] * t, ez = w[2] - d[2] * t; if (t_out) *t_out = t; return sqrtf(ex * ex + ey * ey + ez * ez);
+}
+/* lmb_real: the Amygdala and the Moon Presence have bones my scripts made, and their files now say which limb each bone belongs to. So their limbs are the real limbs too: a blow counts for the limb whose skin your blade is actually at */
+static int lmb_real(void) { return en_ok && EN.type == 4 && cb_map() && ENEMY.lmb && ENEMY.lmf && ENEMY.vb && ENEMY.skinned && ENEMY.pose && ENEMY.nAt >= 4; }
+static void lmb_local(float wx, float wy, float wz, float *l) { float cs = cosf(EN.face), sn = sinf(EN.face), dx = wx - EN.p.x, dy = wy - EN.p.y; l[0] = dx * cs + dy * sn; l[1] = -dx * sn + dy * cs; l[2] = wz - EN.p.z; }
+static int lmb_near(const float *l, float r) {      /* the limb whose skin is nearest this point (model space), 0 = none within r */
+    float best = r * r; int code = 0;
+    for (uint32_t v = 0; v < ENEMY.nV; v++) {
+        int c_ = ENEMY.lmb[ENEMY.vb[v * 4]]; if (!c_) continue;
+        const float *q = &ENEMY.skinned[v * 5]; float dx = q[0] - l[0], dy = q[1] - l[1], dz = q[2] - l[2]; if (fabsf(dx) > r || fabsf(dy) > r || fabsf(dz) > r) continue;
+        float d2 = dx * dx + dy * dy + dz * dz; if (d2 < best) { best = d2; code = c_; }
+    }
+    return code;
+}
+static float limb_sm(float t) { if (t <= 0.0f) return 0.0f; if (t >= 1.0f) return 1.0f; return t * t * (3.0f - 2.0f * t); }
+static void limb_sag(int k) {      /* which vertices hang, and how much: worked out from where the limb is at the moment it breaks (no bone names needed, so it works on all three models). The weights change smoothly across the model, so the skin never tears */
+    Char *c = &ENEMY; if (!c->skinned || !c->nV || (k != 0 && k != 1 && k != 4)) return;
+    if (!c->limp) { c->limp = calloc(c->nV, 1); if (!c->limp) return; }
+    if (lmb_real() && (k < 2 || g_lb_tail >= 0)) {      /* lmb_real: exactly the bones of that limb hang, more toward its tip (for the tail: only the one tail that broke) */
+        int code_ = k == 0 ? 1 : (k == 1 ? 2 : 4 + g_lb_tail); float zm = 0.1f;
+        for (uint32_t v = 0; v < c->nV; v++) if (c->skinned[v * 5 + 2] > zm) zm = c->skinned[v * 5 + 2];
+        c->limp_d = zm * 0.2f;
+        for (uint32_t v = 0; v < c->nV; v++) { int b0 = c->vb[v * 4], b1 = c->vb[v * 4 + 1]; float w0 = c->vb[v * 4 + 2] * (1.0f / 255.0f); float w_ = w0 * (c->lmb[b0] == code_ ? c->lmf[b0] * (1.0f / 255.0f) : 0.0f) + (1.0f - w0) * (c->lmb[b1] == code_ ? c->lmf[b1] * (1.0f / 255.0f) : 0.0f); int b_ = (int)(w_ * 255.0f); if (b_ > c->limp[v]) c->limp[v] = (uint8_t)b_; }
+        return;
+    }
+    if (cb_real() && k < 2) {      /* cb_bones: the Cleric Beast's arm is what lies along the line from his chest to that hand: more droop toward the claws, none at the shoulder */
+        float sp[3], hd[3], zm = 0.1f; cb_att_m(3, sp); cb_att_m(k, hd);
+        for (uint32_t v = 0; v < c->nV; v++) if (c->skinned[v * 5 + 2] > zm) zm = c->skinned[v * 5 + 2];
+        c->limp_d = zm * 0.22f;
+        for (uint32_t v = 0; v < c->nV; v++) { float t_; float d_ = cb_seg_d(&c->skinned[v * 5], sp, hd, &t_); float w_ = limb_sm((t_ - 0.2f) / 0.5f) * (1.0f - limb_sm((d_ - 0.45f) / 0.6f)); int b_ = (int)(w_ * 255.0f); if (b_ > c->limp[v]) c->limp[v] = (uint8_t)b_; }
+        return;
+    }
+    float zmax = 0.1f, rmax = 0.1f, xmin = -0.1f, side = k == 0 ? 1.0f : -1.0f;
+    for (uint32_t v = 0; v < c->nV; v++) { const float *q = &c->skinned[v * 5]; if (q[2] > zmax) zmax = q[2]; if (q[0] < xmin) xmin = q[0]; if (q[0] > 0.0f && q[1] * side > 0.0f) { float r_ = sqrtf(q[0] * q[0] + q[1] * q[1]); if (r_ > rmax) rmax = r_; } }
+    c->limp_d = zmax * 0.2f;
+    for (uint32_t v = 0; v < c->nV; v++) {
+        const float *q = &c->skinned[v * 5]; float w_ = 0.0f;
+        if (k == 4) { if (q[0] < 0.0f) w_ = limb_sm((-q[0] + 0.35f * xmin) / (-0.65f * xmin)); }
+        else if (q[0] > 0.0f && q[1] * side > 0.0f) { float r_ = sqrtf(q[0] * q[0] + q[1] * q[1]), ys_ = q[1] * side / (0.25f * rmax); w_ = limb_sm((r_ - 0.4f * rmax) / (0.6f * rmax)) * (ys_ > 1.0f ? 1.0f : ys_); }
+        int b_ = (int)(w_ * 255.0f); if (b_ > c->limp[v]) c->limp[v] = (uint8_t)b_;
+    }
+}
+static float limb_hit(float dmg) {      /* a blow has landed on the boss: which limb took it? Returns what the blow is multiplied by (a limb that is already broken takes more) */
+    int melee = g_lb_pt_ok; g_lb_pt_ok = 0;
+    if (!limb_on() || g_fire_dot || dmg <= 0.0f) return 1.0f;
+    float px = melee ? g_lb_pt[0] : g_plx, py = melee ? g_lb_pt[1] : g_ply, pz = melee ? g_lb_pt[2] : EN.p.z + 1.2f;
+    float cs = cosf(EN.face), sn = sinf(EN.face), dx = px - EN.p.x, dy = py - EN.p.y, lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs, lz = pz - EN.p.z, R = EN.bod > 0.3f ? EN.bod : 0.3f;
+    int k = -1, tc_ = -1;
+    if (melee && cb_real()) {
+        float p_[3] = { px, py, pz }, hr[3], hl[3], hh[3], sp[3], tr_, tl_; cb_att_w(0, hr); cb_att_w(1, hl); cb_att_w(2, hh); cb_att_w(3, sp);
+        float dr_ = cb_seg_d(p_, sp, hr, &tr_), dl_ = cb_seg_d(p_, sp, hl, &tl_), dh_ = sqrtf((px - hh[0]) * (px - hh[0]) + (py - hh[1]) * (py - hh[1]) + (pz - hh[2]) * (pz - hh[2]));
+        if (dh_ < 1.1f) k = 2;
+        else if (tr_ > 0.3f && dr_ < 1.0f && dr_ <= dl_) k = 0;
+        else if (tl_ > 0.3f && dl_ < 1.0f) k = 1;
+        else if (lz < 0.4f * EN.zhi) k = 3;
+        else return 1.0f;      /* his body */
+    }
+    else if (melee && lmb_real()) {
+        float l_[3], hh_[3], sc_ = ENEMY.scale > 0.0f ? ENEMY.scale : 1.0f; lmb_local(px, py, pz, l_); cb_att_m(2, hh_);
+        float dh_ = sqrtf((l_[0] - hh_[0]) * (l_[0] - hh_[0]) + (l_[1] - hh_[1]) * (l_[1] - hh_[1]) + (l_[2] - hh_[2]) * (l_[2] - hh_[2])); int cd_ = lmb_near(l_, 0.6f + 0.15f * sc_);
+        if (dh_ < 0.97f + 0.33f * sc_) k = 2;
+        else if (cd_ == 1) k = 0; else if (cd_ == 2) k = 1; else if (cd_ == 3) k = 3;
+        else if (cd_ >= 4) { k = 4; tc_ = cd_ - 4; if (tc_ > 39) tc_ = 39; }
+        else return 1.0f;      /* his body */
+    }
+    else if (moon_map() && g_moon_have && lx < -0.35f * R) k = 4;                                              /* behind the Moon Presence: his tails */
+    else if (melee ? (lx > 0.0f && lz > 0.6f * EN.zhi) : (lx > 0.5f * R && fabsf(ly) < 0.6f * lx)) k = 2;      /* a blade high at his front, or a shot from straight ahead: the head */
+    else if (lx > 0.25f * R) k = ly > 0.0f ? 0 : 1;                                                       /* in front, to one side: that arm */
+    else k = 3;                                                                                           /* beside or behind him: the legs */
+    if (k == 4 && tc_ >= 0) {      /* a tail, by its own bones: each tail has its own health, and once one has broken no other tail can */
+        if (g_lb_broke & 16) return tc_ == g_lb_tail ? 1.3f : 1.0f;
+        if (g_lb_thp[tc_] < 0.0f) g_lb_thp[tc_] = limb_max(4);
+        float ld_ = dmg, cp_ = limb_max(4) * 0.45f; if (ld_ > cp_) ld_ = cp_;
+        g_lb_thp[tc_] -= ld_; if (g_lb_thp[tc_] <= 0.0f) { g_lb_thp[tc_] = 0.0f; g_lb_tail = tc_; g_lb_req = 5; }
+        return 1.0f;
+    }
+    if (g_lb_broke & (1 << k)) return k == 2 ? 1.5f : 1.3f;
+    if (g_lb_hp[k] < 0.0f) g_lb_hp[k] = limb_max(k);
+    float ld = melee ? dmg : dmg * 0.5f, cap_ = limb_max(k) * 0.45f; if (ld > cap_) ld = cap_;      /* (no single blow, not even a visceral, breaks a fresh limb) */
+    g_lb_hp[k] -= ld; if (g_lb_hp[k] <= 0.0f) { g_lb_hp[k] = 0.0f; g_lb_req = k + 1; }
+    return 1.0f;
+}
+static void limb_break(int k) {
+    g_lb_broke |= 1 << k; limb_sag(k); boss_stats();
+    float cs = cosf(EN.face), sn = sinf(EN.face), fx = k == 4 ? -1.2f : (k == 3 ? 0.0f : 1.0f), fy = k == 0 ? 0.8f : (k == 1 ? -0.8f : 0.0f), fz = k == 2 ? EN.zhi * 0.8f : (k == 3 ? EN.zhi * 0.2f : EN.zhi * 0.45f);
+    float bx = EN.p.x + (cs * fx - sn * fy) * EN.bod, by = EN.p.y + (sn * fx + cs * fy) * EN.bod, bz = EN.p.z + fz;
+    blood_burst(bx, by, bz, bx - EN.p.x, by - EN.p.y, 26, 5.0f); blood_burst(bx, by, bz, 0.0f, 0.0f, 14, 3.0f);
+    snd_play(S_PARRY, 1.0f); g_nx_dly = (int)(SND_RATE * 0.07f); snd_play_lr(S_PARRY, 0.8f, 0.8f, 0.58f); snd_play_at(S_CB_HOWL, EN.p.x, EN.p.y, 1.3f);      /* the same sounds as a shot that staggers him (the crack, then his howl), with a second, deeper crack a moment after: the bone going */
+    if (g_shake < 0.6f) g_shake = 0.6f; if (g_flash < 0.35f) g_flash = 0.35f;
+    { char t_[48]; snprintf(t_, sizeof t_, "%s BROKEN", g_lb_name[k]); say(t_); maplog("limb_break: %s%s", t_, ""); }
+    { float x_ = EN.hp_max * 0.04f; if (EN.hp - x_ < 1.0f) x_ = EN.hp - 1.0f; if (x_ > 0.0f) { EN.hp -= x_; EN.dmg_sum += (int)(x_ + 0.5f); } }      /* the break itself costs him 4% of his health (it never kills) */
+    if (BS.pend || BS.sub == SUB_TRANS || BS.sub == SUB_DEAD || EN.state == E_DEAD || g_cb_intro) return;      /* about to change form: no stagger, the limb is broken all the same */
+    if (BS.sub == SUB_STAG && EN.stagger) return;      /* already open for a visceral: leave that alone */
+    const BPhase *P = &BPH[BS.phase]; int a = P->counter >= 0 ? P->counter : (P->nhurt > 0 ? P->hurt[0] : -1); if (a < 0) return;
+    g_pvisc_abort = 1; BS.poise = 0.0f; BS.armor = 2.5f;
+    BS.sub = SUB_STAG; EN.state = E_HURT; EN.st = 0.0f; EN.vx = EN.vy = 0.0f; EN.hits = 0;
+    EN.stagger = 1; EN.visc_used = 0; BS.nostag = 0; EN.sdur = STAGGER_TIME; (void)k;      /* any broken limb leaves him open for a visceral attack for the full stagger time */
+    en_play(a, 0.06f, 1);
+}
 static int g_gb_hit;      // gilbert_bounce: set when a blow lands on him, so the bed rocks and slides
 static void boss_hurt(float dmg) {
     if (!en_ok || EN.state == E_DEAD) return;
     if (g_ng > 0) dmg /= ng_hpm();      // ngplus: bosses take less from every hit
     if (BS.sub == SUB_TRANS) return;                             // while he changes nothing touches him
+    if (rl_map() && g_rom_have && g_rm_fade) return;      /* rom_fight: nothing touches her while she vanishes */
     if (gb_map() && BS.phase == 4) g_gb_hit = 1;
     if (!BS.fight) { BS.fight = 1; music_boss(1); if (BS.sub == SUB_WAIT) { BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 0.8f; } }
+    dmg *= limb_hit(dmg);      /* limb_break */
     EN.hp -= dmg; EN.dmg_sum += (int)(dmg + 0.5f); EN.dmg_t = 3.0f;
     if (BS.phase < 2) { float th = BS.phase == 0 ? (gh_map() ? GH_HP * 0.75f : BOSS_P1_HP) : BOSS_P2_HP; if (EN.hp <= th && !(gh_map() && BS.phase == 1)) { EN.hp = th; BS.pend = 1; } }      // gehrman_boss: axe unfolds at 75% and stays two-handed, no beast
     if (gh_map() && BS.phase == 1 && !g_gh_torch && EN.hp <= GH_HP * 0.5f) { g_gh_torch = 1; snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 2.0f, 0.8f); g_shake = 0.25f; }      // gh_torch: at 50% he takes up a torch as well
     else if (BS.phase == 4) { float th = GB_HP * 0.55f; if (EN.hp <= th) { EN.hp = th; if (!BS.pend) maplog("gilbert: break-free pending, sub %s%s", BS.sub == SUB_CHASE ? "chase" : (BS.sub == SUB_ATTACK ? "attack" : (BS.sub == SUB_STAG ? "stagger" : "other")), ""); BS.pend = 1; } }
+    else if (BS.phase == 3 && moon_map() && !g_moon_form && BPH[3].trans >= 0) { float th = EN.hp_max * 0.5f; if (EN.hp <= th) { EN.hp = th; BS.pend = 1; } }      /* moon_arena: at half health he roars and changes form */
     else if (BS.phase == 5 && gb_map() && !g_gb_healed && BPH[5].trans >= 0) { float th = GB_HP * 0.4f; if (EN.hp <= th) { EN.hp = th; g_gb_healed = 1; BS.pend = 1; } }      // gilbert_mech: at 40% he heals once      // gilbert_boss: at 55% he tears free of the table
+    if (BS.phase == 3 && rl_map() && g_rom_have && EN.hp > 0.0f && !g_rm_tp) { float th_ = g_rm_stage == 0 ? 0.75f : (g_rm_stage == 1 ? 0.5f : -1.0f); if (th_ > 0.0f && EN.hp <= EN.hp_max * th_) { EN.hp = EN.hp_max * th_; g_rm_tp = 1; } }      /* rom_fight: at 75% and at 50% she vanishes */
+    if (BS.phase == 3 && rom_map() && !moon_map() && !rl_map() && g_amyg_on && !g_amg_arms && EN.hp <= EN.hp_max * 0.3f) {      /* real_feel / arm_tear: at 30% the Amygdala tears his own arms off to swing as clubs */
+        if (BPH[3].trans >= 0) { EN.hp = EN.hp_max * 0.3f; BS.pend = 1; }      /* (he has the ArmTear animation: it plays first, nothing hurts him meanwhile) */
+        else if (EN.hp > 0.0f) { g_amg_arms = g_amg_arms_m = 1; cb_init(); snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); cb_roar_shake(1.0f); maplog("amygdala: arms torn off (no animation in this amyg.bin)%s%s", "", ""); } }
     if (EN.hp <= 0.0f) {
+        cine_slow(1.7f, 0.28f); g_flash = 0.9f; if (g_shake < 1.0f) g_shake = 1.0f;      /* boss_cine: the killing blow lands in slow motion, with a white flash */
+        g_gh_dying = gh_map();
         if (gh_map()) { snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 2.0f, 0.74f); snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 1.6f, 0.88f); } else snd_play_at(cb_map() ? S_CB_DEATH : S_BOSS_DEATH, EN.p.x, EN.p.y, 1.3f); g_pvisc_abort = 1; music_boss(0);      // gehrman_boss: he dies with Gascoigne's human cry, not the beast's
         EN.hp = 0.0f; EN.state = E_DEAD; BS.sub = SUB_DEAD; EN.st = 0.0f; EN.stagger = 0; EN.vx = EN.vy = 0.0f; ENEMY.show_pistol = 0;
         { int v = gh_map() ? 9000 : gb_map() ? 6000 : (cb_map() ? 4000 : echo_value(EN.type)); if (g_ng > 0) v = (int)(v * ng_hpm()); g_echoes += v; if (g_echo_gain_t <= 0.0f) g_echo_gain = 0; g_echo_gain += v; g_echo_gain_t = 2.5f; }
-        g_insight += 3; if (g_insight > 99) g_insight = 99; if (gh_map()) { g_gh_dead = 1; g_gh_redo = 0; inv_add("BloodstoneChunk", "BLOODSTONE CHUNK", 5, 1); say("OBTAINED BLOODSTONE CHUNK"); snd_play(S_PICKUP, 1.0f); } else if (gb_map())      /* gehrman_chunk: he drops one */ { g_gb_dead = 1; g_gb_redo = 0; } else if (cb_map()) { g_cb_redo = 0; g_cb_dead = 1; g_cb_open = 1; save_write(0); } else if (g_gas_redo) { g_gas_redo = 0; g_arena_hold = 1; } else { g_gas_dead = 1; g_arena_hold = 1; g_arena_wait = 0.0f; g_night_pend = 1; g_banner_shown = 0; }
-        EN.sdur = en_len(BPH[BS.phase].death) * (gh_map() ? gh_dfrac() : 1.0f); en_play(BPH[BS.phase].death, 0.1f, 1);
+        g_insight += 3; if (g_insight > 99) g_insight = 99; if (rl_map() && g_rom_have && !g_rush && !(g_story & 4)) { g_story |= 4; story_save(); maplog("story: Rom is dead - the sky turns to the blood moon%s%s", "", ""); } if (gh_map()) { g_gh_dead = 1; if (!g_rush) g_gh_beaten = 1; g_gh_redo = 0; if (!g_rush) { inv_add("BloodstoneChunk", "BLOODSTONE CHUNK", 5, 1); say("OBTAINED BLOODSTONE CHUNK"); snd_play(S_PICKUP, 1.0f); } } else if (gb_map())      /* gehrman_chunk: he drops one */ { g_gb_dead = 1; g_gb_redo = 0; } else if (cb_map()) { if (!rom_map()) { g_cb_redo = 0; g_cb_dead = 1; g_cb_open = 1; save_write(0); } else if (!g_rush && !moon_map() && !rl_map()) amg_dead_set(1); }      /* the Amygdala: gone from the Dream's roof until his grave offering (not in a boss rush) */ else if (g_gas_redo) { g_gas_redo = 0; g_arena_hold = 1; } else { g_gas_dead = 1; g_arena_hold = 1; if (!g_rush) { g_arena_wait = 0.0f; g_night_pend = 1; g_banner_shown = 0; } }      // (boss rush: no night, no story cutscene)
+        EN.sdur = g_gh_dying ? gh_dlen(BPH[BS.phase].death) : en_len(BPH[BS.phase].death); en_play(BPH[BS.phase].death, 0.1f, 1);
         return;
     }
+    if (g_lb_req) { int k_ = g_lb_req - 1; g_lb_req = 0; limb_break(k_); return; }      /* limb_break: this blow broke a limb */
     const BPhase *P = &BPH[BS.phase];
     if (!g_fire_dot && !EN.stagger && !BS.pend && BS.armor <= 0.0f && P->nhurt > 0 && BS.sub != SUB_STAG) {      // burn ticks never build poise
         BS.poise += dmg;
@@ -11765,7 +12651,7 @@ static int boss_pick_visc(float dist) {                         // the heaviest 
     for (int i = 0; i < P->n; i++) { const BMove *m = &P->m[i]; if (m->fl & (BF_SHOOT | BF_GAP | BF_BEHIND | BF_RETREAT | BF_BODY)) continue; if (dist < m->dmin || dist > m->dmax + 0.4f) continue; if (m->dmg > bd) { bd = m->dmg; best = i; } }
     return best;
 }
-static float boss_rate(const BMove *m) { if (gh_map()) return BS.phase == 1 ? (g_gh_torch ? (EN.hp < GH_HP * 0.3f ? 1.55f : 1.45f) : 1.32f) : 1.12f; if (gb_map()) return BS.phase == 4 ? 1.1f : 1.2f; return cb_map() ? (((m->fl & BF_GAP) ? 1.0f : 1.4f) * g_cb_rate_x) : (BS.phase >= 2 ? BOSS_RATE_B : BOSS_RATE); }      // the Cleric Beast's attacks are quicker, except his jump
+static float boss_rate(const BMove *m) { if (gh_map()) { float r_ = BS.phase == 1 ? (g_gh_torch ? (EN.hp < GH_HP * 0.3f ? 1.55f : 1.45f) : 1.32f) : 1.3f; if (m) { if (m->fl & BF_CHARGE) r_ *= 0.78f; if (m->fl & BF_AIM) r_ *= 0.7f; if (m->fl & BF_PULL) r_ *= 0.9f; if (m->fl & BF_QUICK) r_ = 0.85f; if (m->fl & BF_ARC) r_ = 1.0f; } return r_ * 1.08f; } if (gb_map()) return BS.phase == 4 ? 1.1f : 1.2f; return cb_map() ? (((m->fl & BF_GAP) ? 1.0f : 1.4f) * g_cb_rate_x * (moon_map() ? (g_moon_form ? 1.28f : 1.15f) : 1.0f)) : (BS.phase >= 2 ? BOSS_RATE_B : BOSS_RATE); }      // the Cleric Beast's attacks are quicker, except his jump
 static void cb_roar_shake(float amt) {      /* the Cleric Beast's roar shakes the camera: hard when you stand close, a rumble from far away */
     float d_ = hypotf(g_plx - EN.p.x, g_ply - EN.p.y), k_ = 1.15f - d_ / 20.0f; if (k_ < 0.12f) k_ = 0.12f; if (k_ > 1.0f) k_ = 1.0f; if (g_shake < amt * k_) g_shake = amt * k_;
 }
@@ -11800,8 +12686,146 @@ static float cb_land_f(const BMove *m) {      /* cb_intro: the fraction of the l
     if (ov_ > 0.0f) return ov_;
     float f_ = (m->nwin > 0) ? m->win[0][1] - 0.03f : 0.7f; if (f_ < 0.4f) f_ = 0.4f; if (f_ > 0.97f) f_ = 0.97f; return f_;
 }
+// ---- amyg_beam: the Amygdala's arcane beam. He rears up and charges blue light at his head, the beam locks onto where you stand, then a series of explosions marches along the ground line
+#define BEAM_DMG 34.0f
+static int g_bm_ph, g_bm_i, g_bm_n, g_bm_hit; static float g_bm_t, g_bm_tx, g_bm_ty, g_bm_tz, g_bm_dx, g_bm_dy;
+static void beam_head(float *x, float *y, float *z) {                  // the head attachment (index nB + 2), posed, in the world
+    *x = EN.p.x + cosf(EN.face) * 1.2f; *y = EN.p.y + sinf(EN.face) * 1.2f; *z = EN.p.z + 3.0f;
+    if (EN.ch.pose && EN.ch.nAt >= 3) {
+        const float *m = EN.ch.pose + (size_t)(EN.ch.nB + 2) * 12; float cs = cosf(EN.face + EN.yaw_off), sn = sinf(EN.face + EN.yaw_off);
+        float wx = EN.p.x + cs * m[3] - sn * m[7], wy = EN.p.y + sn * m[3] + cs * m[7], wz = EN.p.z + m[11];
+        if (hypotf(wx - EN.p.x, wy - EN.p.y) < 6.0f && wz > EN.p.z && wz < EN.p.z + 9.0f) { *x = wx; *y = wy; *z = wz; }
+    }
+}
+static float beam_step(const Player *pl, float f, float dt, int invuln) {      // returns the damage you take this frame; f = how far through the move (0..1)
+    float dmg = 0.0f, hx, hy, hz; beam_head(&hx, &hy, &hz);
+    if (f >= 0.18f && f < 0.40f) {                                       // charging: blue light gathers at his head
+        float k = (f - 0.18f) / 0.22f; glow_add_c(hx, hy, hz, 0.5f + 1.5f * k, 1);
+        if (frand() < 25.0f * dt * k) spark_spawn(hx + (frand() - 0.5f) * 0.6f, hy + (frand() - 0.5f) * 0.6f, hz + (frand() - 0.5f) * 0.6f, 0.1f);
+    }
+    if (g_bm_ph == 0 && f >= 0.40f) {                                    // the beam locks onto where you stand now: a quick step sideways beats it
+        float dx = pl->x - EN.p.x, dy = pl->y - EN.p.y, d = sqrtf(dx * dx + dy * dy); if (d < 0.1f) { dx = cosf(EN.face); dy = sinf(EN.face); d = 1.0f; }
+        g_bm_tx = pl->x; g_bm_ty = pl->y; g_bm_tz = pl->z; g_bm_dx = dx / d; g_bm_dy = dy / d;
+        g_bm_n = (int)((d - 1.8f) / 1.25f) + 4; if (g_bm_n < 4) g_bm_n = 4; if (g_bm_n > 18) g_bm_n = 18;
+        g_bm_ph = 1; g_bm_t = 0.0f; g_bm_hit = 0; snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.5f);
+    }
+    if (g_bm_ph == 1) {                                                  // the beam stands for a moment: a bright line from his head to the ground
+        g_bm_t += dt;
+        for (int k = 0; k <= 10; k++) { float u = k / 10.0f; glow_add_c(hx + (g_bm_tx - hx) * u, hy + (g_bm_ty - hy) * u, hz + (g_bm_tz + 0.4f - hz) * u, 0.55f + 0.35f * sinf(g_bm_t * 40.0f + k), 1); }
+        if (frand() < 30.0f * dt) { float u = frand(); spark_spawn(hx + (g_bm_tx - hx) * u, hy + (g_bm_ty - hy) * u, hz + (g_bm_tz + 0.4f - hz) * u, 0.12f); }
+        if (g_bm_t >= 0.55f) { g_bm_ph = 2; g_bm_i = 0; g_bm_t = 0.0f; }
+    } else if (g_bm_ph == 2) {                                           // then the line blows up, one blast after another, running away from him
+        g_bm_t += dt;
+        while (g_bm_i < g_bm_n && g_bm_t >= g_bm_i * 0.07f) {
+            float d = 1.8f + g_bm_i * 1.25f, x = EN.p.x + g_bm_dx * d, y = EN.p.y + g_bm_dy * d, z = g_bm_tz;
+            ground_impact(x, y, z, 0.9f); glow_add_c(x, y, z + 0.6f, 2.2f, 1);
+            for (int q = 0; q < 5; q++) spark_spawn(x + (frand() - 0.5f) * 1.2f, y + (frand() - 0.5f) * 1.2f, z + 0.3f + frand() * 1.2f, 0.2f);
+            if (g_bm_i % 3 == 0) snd_play_at(S_CB_IMPACT, x, y, 1.3f);
+            if (g_bm_i == 0) cb_roar_shake(0.5f);
+            if (!invuln && !g_bm_hit && hypotf(pl->x - x, pl->y - y) < 1.8f && fabsf(pl->z - z) < 2.4f) { dmg += BEAM_DMG; g_bm_hit = 1; }
+            g_bm_i++;
+        }
+        if (g_bm_i >= g_bm_n) g_bm_ph = 3;
+    }
+    return dmg;
+}
+// ---- amyg_unstick: how much room there is in a direction (ray from his chest, up to `len` m), a clearance check for his backward hop, and a way out when he is wedged in a corner
+static int g_amyg_on;
+static float boss_free(float ang, float len) {
+    float o[3] = { EN.p.x, EN.p.y, EN.p.z + 1.0f }, v[3] = { cosf(ang), sinf(ang), 0.0f }, th = len;
+    return cw_raycast(&world, o, v, len, &th) ? th : len;
+}
+static float boss_back_free(void) {      // the room behind him (the narrowest of three rays)
+    float a = EN.face + 3.14159265f, r = boss_free(a, 6.0f), r1 = boss_free(a + 0.35f, 6.0f), r2 = boss_free(a - 0.35f, 6.0f);
+    if (r1 < r) r = r1; if (r2 < r) r = r2; return r;
+}
+static float g_us_t, g_us_run, g_us_x, g_us_y, g_us_dx, g_us_dy;
+static float g_ar_beam_cd, g_ar_hop_cd; static int g_ar_rng;      // amyg_variety: cooldowns on the beam and the backward hop, and never two of those in a row, so he cannot be looped into them
+// ---- moon_unique: what only the Moon Presence does (the Amygdala has his beam, his hops and his torn-off arms).
+//      Blood orbs: in place of the beam he spits a volley of dark red orbs (3, or 5 in his second form) that curve after you for a second and a half; a roll goes through them.
+//      Water spouts (second form only): after one of his slams the lake erupts under you three times, half a second apart; each one glows where it will come up for most of a second first.
+typedef struct { float x, y, z, vx, vy, vz, t; int on; } MpOrb; typedef struct { float x, y, z, fuse; int on; } MpSpout;
+static MpOrb g_mporb[6]; static MpSpout g_mpsp[4]; static int g_mp_spq; static float g_mp_spt;
+static void moon_fx_reset(void) { memset(g_mporb, 0, sizeof g_mporb); memset(g_mpsp, 0, sizeof g_mpsp); g_mp_spq = 0; g_mp_spt = 0.0f; }
+static void moon_orb(const Player *pl, int k) {
+    for (int i = 0; i < 6; i++) if (!g_mporb[i].on) { MpOrb *o = &g_mporb[i]; float cs = cosf(EN.face), sn = sinf(EN.face), sc = ENEMY.scale > 0.0f ? ENEMY.scale : 1.0f, sd = (k % 2 ? 1.0f : -1.0f) * 0.5f * ((k + 1) / 2);
+        o->x = EN.p.x + cs * 2.0f * sc - sn * sd; o->y = EN.p.y + sn * 2.0f * sc + cs * sd; o->z = EN.p.z + 1.5f * sc;
+        float dx = pl->x - o->x, dy = pl->y - o->y, dz = pl->z + 1.0f - o->z, d = sqrtf(dx * dx + dy * dy + dz * dz); if (d < 0.1f) d = 0.1f;
+        o->vx = dx / d * 9.0f - sn * sd * 3.0f; o->vy = dy / d * 9.0f + cs * sd * 3.0f; o->vz = dz / d * 9.0f + 2.0f; o->t = 0.0f; o->on = 1; snd_play_at_p(g_snd_nv[S_W_TONI_ACT] ? S_W_TONI_ACT : S_CB_SWING, o->x, o->y, 0.9f, 0.6f + 0.08f * k); return; }      /* own_sounds: each orb of the volley a step higher than the last */
+}
+static float moon_fx_tick(float dt, const Player *pl, int invuln) {
+    if (!g_moon_seen && moon_map()) { g_moon_seen = 1; save_write(0); maplog("moonlight: the Moon Presence has been seen - the messengers now sell the Holy Moonlight Sword%s%s", "", ""); }      /* moonlight_sword */
+    float dmg = 0.0f;
+    for (int i = 0; i < 6; i++) { MpOrb *o = &g_mporb[i]; if (!o->on) continue;
+        o->t += dt; if (o->t > 3.2f) { o->on = 0; continue; }
+        float dx = pl->x - o->x, dy = pl->y - o->y, dz = pl->z + 1.0f - o->z, d = sqrtf(dx * dx + dy * dy + dz * dz);
+        if (o->t < 1.5f && d > 0.2f) { float k = 2.2f * dt; o->vx += (dx / d * 9.0f - o->vx) * k; o->vy += (dy / d * 9.0f - o->vy) * k; o->vz += (dz / d * 9.0f - o->vz) * k; }
+        o->x += o->vx * dt; o->y += o->vy * dt; o->z += o->vz * dt;
+        glow_add_c(o->x, o->y, o->z, 0.75f, 0); if (frand() < 0.5f) blood_burst(o->x, o->y, o->z, -o->vx, -o->vy, 1, 0.8f);
+        if (o->z < pl->z - 0.3f && o->t > 0.3f) { blood_burst(o->x, o->y, o->z + 0.2f, 0.0f, 0.0f, 6, 2.0f); o->on = 0; continue; }
+        if (!invuln && d < 0.85f) { dmg += 16.0f; blood_burst(o->x, o->y, o->z, o->vx, o->vy, 10, 2.6f); snd_play_at_p(S_HIT, o->x, o->y, 0.9f, 0.68f); o->on = 0; } }
+    if (g_mp_spq > 0) { g_mp_spt -= dt; if (g_mp_spt <= 0.0f) { g_mp_spq--; g_mp_spt = 0.55f; for (int i = 0; i < 4; i++) if (!g_mpsp[i].on) { g_mpsp[i].on = 1; g_mpsp[i].x = pl->x; g_mpsp[i].y = pl->y; g_mpsp[i].z = pl->z; g_mpsp[i].fuse = 0.85f; snd_play_at_p(S_CB_STEP, pl->x, pl->y, 0.9f, 0.62f); break; } } }      /* own_sounds: a low rumble under your feet as the water gathers */
+    for (int i = 0; i < 4; i++) { MpSpout *q = &g_mpsp[i]; if (!q->on) continue;
+        q->fuse -= dt;
+        if (q->fuse > 0.0f) { glow_add_c(q->x, q->y, q->z + 0.25f, 0.9f + 1.2f * (0.85f - q->fuse), 1); for (int k = 0; k < 2; k++) { float a_ = frand() * 6.2832f; spark_spawn(q->x + cosf(a_) * 1.6f, q->y + sinf(a_) * 1.6f, q->z + 0.1f + frand() * 0.2f, 0.1f); } continue; }
+        q->on = 0; ground_impact(q->x, q->y, q->z, 1.0f); snd_play_at(S_CB_IMPACT, q->x, q->y, 1.2f);
+        for (int k = 0; k < 14; k++) spark_spawn(q->x + (frand() - 0.5f) * 1.2f, q->y + (frand() - 0.5f) * 1.2f, q->z + frand() * 3.0f, 0.14f);
+        for (int k = 0; k < 3; k++) smoke_puff(q->x + (frand() - 0.5f) * 0.8f, q->y + (frand() - 0.5f) * 0.8f, q->z + 0.4f + k * 0.7f, 1.2f);
+        if (!invuln && hypotf(pl->x - q->x, pl->y - q->y) < 1.7f && fabsf(pl->z - q->z) < 2.5f) dmg += 22.0f; }
+    return dmg;
+}
+/* ---- rom_fight: Rom, the Vacuous Spider. She does not attack at first: her children guard her. At 75% and again at 50% of her health she vanishes, appears far across the lake and calls her dead children back; from the first vanishing on she fights with arcane crystals (see BDR). */
+typedef struct { float x, y, z, t; int on; } RmMet; static RmMet g_rmm[10]; static float g_rm_ft; static int g_rm_cleared;
+static void rom_reset(void) { memset(g_rmm, 0, sizeof g_rmm); g_rm_stage = 0; g_rm_tp = 0; g_rm_fade = 0; g_rm_vis = 1.0f; g_rm_ft = 0.0f; g_rm_cleared = 0; }
+static void rom_meteors(const Player *pl) {      /* the crystal rain: one straight at you, the rest scattered round you, each a moment after the last; a pale mark on the water shows where each will land */
+    int n = g_rm_stage >= 2 ? 9 : 7;
+    for (int k = 0; k < n && k < 10; k++) { RmMet *q = &g_rmm[k]; float a_ = frand() * 6.2832f, r_ = k == 0 ? 0.0f : 1.4f + frand() * 5.5f; q->x = pl->x + cosf(a_) * r_; q->y = pl->y + sinf(a_) * r_; q->z = pl->z; q->t = -0.14f * k; q->on = 1; }
+    snd_play_at_p(S_W_TONI_ACT, EN.p.x, EN.p.y, 1.0f, 0.5f);
+}
+static void rom_wave(const Player *pl) {      /* her dead children rise again in a ring round her */
+    Enemy *sv_ = ECUR; Char *sc_ = CUR; float bx_ = sv_->p.x, by_ = sv_->p.y, bz_ = sv_->p.z; int n_ = 0;
+    for (int k = 0; k < g_rm_nsp; k++) { int i = g_rm_sp[k]; if (i < 0 || i >= n_en || ENS[i].type != 13 || ENS[i].state != E_DEAD) continue;
+        float a_ = frand() * 6.2832f, r_ = 5.5f + frand() * 3.5f; ENS[i].hx = bx_ + cosf(a_) * r_; ENS[i].hy = by_ + sinf(a_) * r_; ENS[i].hz = bz_ + 0.3f; ENS[i].hyaw = a_;
+        enemy_reset(i, pl->x, pl->y, pl->z); glow_add_c(ENS[i].hx, ENS[i].hy, bz_ + 0.6f, 1.6f, 1); n_++; }
+    ECUR = sv_; CUR = sc_; { char t_[64]; snprintf(t_, sizeof t_, "rom: %d children called back", n_); maplog("%s%s", t_, ""); }
+}
+static float rom_tick(float dt, const Player *pl, int invuln) {
+    float dmg = 0.0f;
+    if (EN.state == E_DEAD || BS.sub == SUB_DEAD) {      /* she is dead: her children die with her */
+        if (!g_rm_cleared) { g_rm_cleared = 1; Enemy *sv_ = ECUR; Char *sc_ = CUR; for (int k = 0; k < g_rm_nsp; k++) { int i = g_rm_sp[k]; if (i >= 0 && i < n_en && ENS[i].type == 13 && ENS[i].state != E_DEAD) { ECUR = &ENS[i]; CUR = &ENEMY; enemy_hurt(99999.0f); } } ECUR = sv_; CUR = sc_; }
+        g_rm_vis = 1.0f; g_rm_fade = 0; memset(g_rmm, 0, sizeof g_rmm); return 0.0f;
+    }
+    { static int psub_ = -1; if (psub_ == SUB_ATTACK && BS.sub != SUB_ATTACK && BS.sub != SUB_DEAD && !g_rm_fade) { float qc_ = 2.8f + frand() * 1.4f; if (EN.cool < qc_) EN.cool = qc_; }      /* attacks queue: a breather after each swing, never two back to back */
+      psub_ = BS.sub; }
+    if (g_rm_stage == 0 && !g_rm_fade && BS.sub == SUB_ATTACK) { BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.vx = EN.vy = 0.0f; EN.hits = 0; if (EN.a_idle >= 0) en_play(EN.a_idle, 0.15f, 0); }      /* phase one: whatever started an attack, she stands still */
+    if (g_rm_stage == 0 || g_rm_fade) { if (EN.cool < 0.5f) EN.cool = 0.5f; }      /* she does not attack before her first vanishing, nor while she is vanishing */
+    if (g_rm_tp && !g_rm_fade && BS.sub == SUB_CHASE) { g_rm_fade = 1; g_rm_ft = 0.0f; EN.vx = EN.vy = 0.0f; snd_play_at_p(S_W_TONI_ACT, EN.p.x, EN.p.y, 1.0f, 0.42f); maplog("rom: vanishing%s%s", "", ""); }
+    if (g_rm_fade == 1) {
+        g_rm_ft += dt; g_rm_vis = 1.0f - g_rm_ft / 0.9f; if (g_rm_vis < 0.0f) g_rm_vis = 0.0f;
+        for (int k = 0; k < 3; k++) spark_spawn(EN.p.x + (frand() - 0.5f) * 7.0f, EN.p.y + (frand() - 0.5f) * 7.0f, EN.p.z + frand() * 5.0f, 0.14f); glow_add_c(EN.p.x, EN.p.y, EN.p.z + 2.5f, 5.0f * (1.0f - g_rm_vis), 1);
+        if (g_rm_ft >= 0.9f) {      /* gone: she comes back on the far side of the lake from you */
+            float a_ = atan2f(-pl->y, -pl->x) + (frand() - 0.5f) * 1.2f, nx_ = cosf(a_) * 25.0f, ny_ = sinf(a_) * 25.0f, gz_;
+            if (hypotf(nx_ - pl->x, ny_ - pl->y) < 18.0f) { nx_ = -nx_; ny_ = -ny_; }
+            if (hypotf(nx_ + 26.0f, ny_) < 8.0f) { nx_ = 20.0f; ny_ = (pl->y > 0.0f ? -16.0f : 16.0f); }      /* (not on top of the lantern's islet) */
+            EN.p.x = nx_; EN.p.y = ny_; if (cw_floor(&world, nx_, ny_, EN.p.z + 3.0f, &gz_)) EN.p.z = gz_; EN.face = atan2f(pl->y - ny_, pl->x - nx_); EN.vx = EN.vy = 0.0f;
+            g_rm_stage++; g_rm_tp = 0; rom_wave(pl); g_rm_fade = 2; g_rm_ft = 0.0f; g_rm_vis = 0.0f; { char t_[64]; snprintf(t_, sizeof t_, "rom: reappeared at %.0f %.0f, stage %d", nx_, ny_, g_rm_stage); maplog("%s%s", t_, ""); }
+        }
+    } else if (g_rm_fade == 2) {
+        g_rm_ft += dt; g_rm_vis = g_rm_ft / 0.9f; glow_add_c(EN.p.x, EN.p.y, EN.p.z + 2.5f, 5.0f * (1.0f - (g_rm_vis > 1.0f ? 1.0f : g_rm_vis)), 1);
+        if (g_rm_ft >= 0.9f) { g_rm_fade = 0; g_rm_vis = 1.0f; EN.cool = 1.5f; }
+    }
+    for (int k = 0; k < 10; k++) { RmMet *q = &g_rmm[k]; if (!q->on) continue;
+        q->t += dt; if (q->t < 0.0f) continue;
+        float h_ = 15.0f * (1.0f - q->t); if (h_ < 0.0f) h_ = 0.0f;
+        glow_add_c(q->x, q->y, q->z + h_ + 0.3f, 1.0f, 1); glow_add_c(q->x, q->y, q->z + 0.15f, 0.5f + 0.9f * q->t, 1); if (frand() < 0.6f) spark_spawn(q->x + (frand() - 0.5f) * 0.3f, q->y + (frand() - 0.5f) * 0.3f, q->z + h_ + 0.6f, 0.08f);
+        if (q->t >= 1.0f) { q->on = 0; ground_impact(q->x, q->y, q->z, 0.8f); snd_play_at(S_CB_IMPACT, q->x, q->y, 0.9f); for (int j = 0; j < 10; j++) spark_spawn(q->x + (frand() - 0.5f) * 1.4f, q->y + (frand() - 0.5f) * 1.4f, q->z + frand() * 1.6f, 0.13f);
+            if (!invuln && hypotf(pl->x - q->x, pl->y - q->y) < 1.8f && fabsf(pl->z - q->z) < 2.5f) dmg += 28.0f; }
+    }
+    return dmg;
+}
 static void boss_start_move(int k, float dist) {
-    BS.pvisc = 0; g_bt_have = 0; g_bimp = 0;
+    BS.pvisc = 0; g_bm_ph = 0; g_bm_t = 0.0f; g_bm_hit = 0;
+    if (g_amyg_on) { const BMove *mm_ = &BPH[BS.phase].m[k]; g_ar_rng = (mm_->fl & (BF_BEAM | BF_RETREAT)) ? 1 : 0; if (mm_->fl & BF_BEAM) g_ar_beam_cd = (!moon_map() && EN.hp < EN.hp_max * 0.7f) ? 6.0f : 10.0f;      /* real_feel: from 70% the Amygdala fires his beam more often */ if (mm_->fl & BF_RETREAT) g_ar_hop_cd = 7.0f; } g_bt_have = 0; g_bimp = 0;
     const BPhase *P = &BPH[BS.phase]; const BMove *m = &P->m[k];
     if (BS.phase >= 2 && (m->fl & BF_GAP)) { snd_play_at(cb_map() ? S_CB_ROAR : S_BOSS_DASH, EN.p.x, EN.p.y, 1.3f); if (cb_map()) cb_roar_shake(0.6f); }       // the beast cries out as he launches
     if (gb_map() && m->dmg <= 0.0f) { snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 2.2f, 0.7f); cb_roar_shake(0.9f); }      // gilbert_mech: a roar, no blow
@@ -11812,19 +12836,32 @@ static void boss_start_move(int k, float dist) {
         if (tx > 0.5f && (m->fl & BF_GAP)) { sc = (dist - 1.3f) / tl; if (sc > 1.6f) sc = 1.6f; if (sc < 0.35f) sc = 0.35f; }     // lunges stop in front of you
         else if (tl > 4.0f) sc = 4.0f / tl;
     }
+    if (g_amyg_on && (m->fl & BF_RETREAT) && tl > 0.3f) { float fr_ = boss_back_free(); if (fr_ < 4.5f) { float cap_ = (fr_ - 0.9f) / tl; sc = cap_ < sc ? (cap_ > 0.0f ? cap_ : 0.0f) : sc; } }      // amyg_unstick: the backward hop stops short of the wall
     EN.vx = (cosf(EN.face) * tx - sinf(EN.face) * ty) * sc / EN.sdur;
     EN.vy = (sinf(EN.face) * tx + cosf(EN.face) * ty) * sc / EN.sdur;
     en_play(m->a, 0.10f, 1);
+    if (gh_map()) {      // gh_redo
+        g_gh_shit = 0;
+        if (m->fl & BF_PULL) { g_gh_pull_cd = 8.0f; snd_play_at(S_BOSS_DASH, EN.p.x, EN.p.y, 1.2f); }
+        if (m->fl & BF_QUICK) { EN.vx = EN.vy = 0.0f; }
+        if (m->fl & BF_ARC) { g_gh_arc_cd = 24.0f; EN.sdur = 7.15f; EN.vx = EN.vy = 0.0f; en_play(m->a, 0.2f, 0); snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 2.0f, 0.6f); maplog("gehrman: arcane blast charging%s%s", "", ""); }
+    }
 }
 static void boss_begin_trans(void) {                             // phase 0 -> 1: unfold the axe; 1 -> 2: turn into the beast
     const BPhase *P = &BPH[BS.phase];
     snd_play(BS.phase == 0 ? S_BOSS_AXE : S_BOSS_BEAST, 1.0f); if (BS.phase == 1) music_boss(2);      // (gilbert: the table breaks)
+    cine_slow(0.55f, 0.45f); if (g_flash < 0.45f) g_flash = 0.45f; if (g_shake < 0.6f) g_shake = 0.6f;      /* boss_cine: a phase change opens with a beat of slow motion */
     BS.pend = 0; BS.sub = SUB_TRANS; EN.state = E_CHASE; BS.stage = 0; EN.stagger = 0; EN.vx = EN.vy = 0.0f; EN.hits = 0; ENEMY.show_pistol = 0;
     int ta_ = P->trans; if (gb_map() && BS.phase == 4) { int k_ = frand() < 0.5f ? 0 : 1; if (g_gb_bfa[k_] >= 0 && hypotf(g_plx - EN.p.x, g_ply - EN.p.y) < 4.5f) ta_ = g_gb_bfa[k_]; }      // gilbert_mech: tearing free, he lashes out at you if you stand close
     EN.st = 0.0f; EN.sdur = ta_ >= 0 ? en_len(ta_) : 1.0f; en_play(ta_, 0.15f, 1);
     if (gb_map()) { char t_[120]; snprintf(t_, sizeof t_, "gilbert: transition begins, anim %d %s len %.2f, phase %d", ta_, (ta_ >= 0 && ta_ < (int)ENEMY.nA) ? ENEMY.anim[ta_].name : "NONE", EN.sdur, BS.phase); maplog("%s%s", t_, ""); }
 }
+static void moon_swap_form(int f);
 static void boss_trans_next(void) {
+    if (rom_map() && !moon_map() && !rl_map() && BS.phase == 3 && g_amyg_on && !g_amg_arms) {      /* arm_tear: the tearing is over: from here he wears the model that holds the arms (amyg2.bin, if it is on the card) */
+        g_amg_arms = g_amg_arms_m = 1; cb_init(); if (g_amg2_have) boss_swap_char(cb_char()); boss_stats(); BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 0.5f; BS.pend = 0; en_play(BPH[3].idle, 0.2f, 0);
+        maplog("amygdala: arms torn off%s%s", g_amg2_have ? " (amyg2.bin)" : " (amyg2.bin missing: same model)", ""); return; }
+    if (moon_map() && BS.phase == 3) { moon_swap_form(1); BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 0.6f; BS.pend = 0; en_play(BPH[3].idle, 0.2f, 0); return; }      /* moon_arena: the second form */
     if (gb_map() && BS.phase == 5) { EN.hp += GB_HP * 0.15f; if (EN.hp > GB_HP * 0.55f) EN.hp = GB_HP * 0.55f; BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 0.5f; en_play(BPH[5].idle, 0.2f, 0); return; }      // gilbert_mech: healed
     if (gb_map() && BS.phase == 4) maplog("gilbert: break-free finished, now free%s%s", "", "");
     if (BS.phase == 4) { BS.phase = 5; boss_stats(); BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 0.4f; en_play(BPH[5].idle, 0.2f, 0); return; }      // gilbert_boss: free of the table
@@ -11837,11 +12874,73 @@ static void boss_trans_next(void) {
         BS.stage = 0; BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 0.6f; en_play(BPH[2].idle, 0.2f, 0);
     }
 }
+static void moon_swap_form(int f) {      /* moon_arena: switch the Moon Presence between his two forms (the animations match index for index, so whatever he is doing carries on) */
+    if (!moon_map() || !g_moon_have || BS.idx < 0 || BS.idx >= n_en) return;
+    Enemy *sv_ = ECUR; ECUR = &ENS[BS.idx]; g_moon_form = f ? 1 : 0; cb_init(); boss_swap_char(&MOONC[g_moon_form]); ECUR = sv_;
+}
+// amyg_walls: the Amygdala's body is about 4 m across but the world pushes him out of walls like a 0.6 m player. Rays all round him find any wall closer than his body and he is pushed back from it, so his body no longer sinks into pillars and cliffs.
+static void amyg_wall_push(void) {
+    if (!g_amyg_on || !cb_map()) return;
+    const float R = 2.1f;
+    for (int it = 0; it < 3; it++) {
+        float px = 0.0f, py = 0.0f;
+        for (int k = 0; k < 12; k++) {
+            float a = (float)k * 0.5236f, d[3] = { cosf(a), sinf(a), 0.0f }, o[3] = { EN.p.x, EN.p.y, EN.p.z + 0.9f }, th = R;
+            if (cw_raycast(&world, o, d, R, &th) && th < R) { px -= d[0] * (R - th); py -= d[1] * (R - th); }
+        }
+        if (px == 0.0f && py == 0.0f) break;
+        EN.p.x += px * 0.4f; EN.p.y += py * 0.4f;
+    }
+}
+// amyg_los: his blows never reach through scenery: a wall, pillar or tree between his body and the player stops the hit
+static int boss_los(const Player *pl) {
+    float o[3] = { EN.p.x, EN.p.y, EN.p.z + 1.4f }, v[3] = { pl->x - o[0], pl->y - o[1], (pl->z + 1.1f) - o[2] }, th, l3 = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (l3 < 1.0f) return 1;
+    v[0] /= l3; v[1] /= l3; v[2] /= l3;
+    return !cw_raycast(&world, o, v, l3 - 0.5f, &th);
+}
 // does one of his blows reach the player right now?
 static int boss_connects(const Player *pl, const BMove *m, float dist) {
     if (bb_map()) {                                                // the Cleric Beast / Gilbert: reach in front of his body (his bones are matched by name, so don't trust the hand points)
         float a_ = atan2f(pl->y - EN.p.y, pl->x - EN.p.x) - EN.face; while (a_ > 3.14159265f) a_ -= 6.28318531f; while (a_ < -3.14159265f) a_ += 6.28318531f;
-        return dist < EN.bod + ((gb_map() && BS.phase == 4) ? 1.9f : 3.0f) && fabsf(a_) < ((m->fl & BF_BODY) ? 2.4f : 1.5f) && fabsf(pl->z - EN.p.z) < ((gb_map() && BS.phase == 4) ? 3.5f : 2.8f);      // gilbert_boss: on the table his reach is short; the bed hangs above him so the height band is wider      // generous reach: his swings are wide
+        int r_ = dist < EN.bod + ((gb_map() && BS.phase == 4) ? 1.9f : (g_amyg_on ? (g_amg_arms ? 3.3f : 2.4f) : 3.0f)) && fabsf(a_) < ((m->fl & BF_BODY) ? 2.4f : 1.5f) && fabsf(pl->z - EN.p.z) < ((gb_map() && BS.phase == 4) ? 3.5f : 2.8f);
+        if (cb_real() && !(m->fl & BF_BODY)) {      /* cb_arm: the Cleric Beast's whole arm is the hit box while it swings, from the shoulder to past the claws (his hand, head and spine bones are real). Whatever part of the moving arm sweeps through you hits, wherever you stand round him: rolling under the claws alone no longer saves you. His jaws count the same way. Standing in front of him is no longer enough by itself */
+            static float pv_[3][3], pst_ = -1.0f; static const Enemy *pe_ = NULL; float cur_[3][3], sp_[3]; int hit_ = 0;
+            for (int k_ = 0; k_ < 3; k_++) cb_att_w(k_, cur_[k_]);
+            cb_att_w(3, sp_);
+            int fresh_ = (pe_ == ECUR && EN.st >= pst_ && EN.st - pst_ < 0.12f);      /* (were we here last frame? then we know how fast each hand is moving) */
+            for (int k_ = 0; k_ < 3 && !hit_; k_++) {
+                float mv_ = fresh_ ? sqrtf((cur_[k_][0] - pv_[k_][0]) * (cur_[k_][0] - pv_[k_][0]) + (cur_[k_][1] - pv_[k_][1]) * (cur_[k_][1] - pv_[k_][1]) + (cur_[k_][2] - pv_[k_][2]) * (cur_[k_][2] - pv_[k_][2])) : 0.0f;
+                if (mv_ < 0.035f) continue;      /* only the arm (or head) that is actually swinging: about 2 m a second or more */
+                for (int h_ = 0; h_ < 3 && !hit_; h_++) {      /* your body: shins, chest, head */
+                    float p_[3] = { pl->x, pl->y, pl->z + 0.35f + 0.6f * h_ }, t_, d_;
+                    if (k_ == 2) { d_ = sqrtf((p_[0] - cur_[2][0]) * (p_[0] - cur_[2][0]) + (p_[1] - cur_[2][1]) * (p_[1] - cur_[2][1]) + (p_[2] - cur_[2][2]) * (p_[2] - cur_[2][2])); if (d_ < 1.25f) hit_ = 1; }
+                    else { d_ = cb_seg_d(p_, sp_, cur_[k_], &t_); if (t_ > 0.15f && d_ < 1.05f) hit_ = 1; }
+                }
+            }
+            memcpy(pv_, cur_, sizeof pv_); pst_ = EN.st; pe_ = ECUR;
+            r_ = hit_;
+        }
+        else if (lmb_real() && !(m->fl & BF_BODY)) {      /* lmb_arm: the same for the Amygdala and the Moon Presence: the whole of the arm that is swinging is the hit box (every bit of its skin, where it really is this frame), and the head when it lunges. If neither hand nor the head is moving (a stomp, say) the old reach rule above still decides */
+            static float pv_[3][3], pst_ = -1.0f; static const Enemy *pe_ = NULL; float cur_[3][3], l_[3], sc_ = ENEMY.scale > 0.0f ? ENEMY.scale : 1.0f; int hit_ = 0, any_ = 0;
+            for (int k_ = 0; k_ < 3; k_++) cb_att_w(k_, cur_[k_]);
+            int fresh_ = (pe_ == ECUR && EN.st >= pst_ && EN.st - pst_ < 0.12f); lmb_local(pl->x, pl->y, pl->z, l_);
+            for (int k_ = 0; k_ < 3; k_++) {
+                float mv_ = fresh_ ? sqrtf((cur_[k_][0] - pv_[k_][0]) * (cur_[k_][0] - pv_[k_][0]) + (cur_[k_][1] - pv_[k_][1]) * (cur_[k_][1] - pv_[k_][1]) + (cur_[k_][2] - pv_[k_][2]) * (cur_[k_][2] - pv_[k_][2])) : 0.0f;
+                if (mv_ < 0.035f * sc_) continue;
+                any_ = 1; if (hit_) continue;
+                if (k_ == 2) { float hr_ = 0.3f + 0.9f * sc_; for (int h_ = 0; h_ < 3; h_++) { float dx = pl->x - cur_[2][0], dy = pl->y - cur_[2][1], dz = pl->z + 0.35f + 0.6f * h_ - cur_[2][2]; if (dx * dx + dy * dy + dz * dz < hr_ * hr_) hit_ = 1; } }
+                else { int code_ = k_ + 1; float rr_ = 0.6f;
+                    for (uint32_t v = 0; v < ENEMY.nV; v += 2) {
+                        if (ENEMY.lmb[ENEMY.vb[v * 4]] != code_) continue;
+                        const float *q = &ENEMY.skinned[v * 5]; float dz = q[2] - l_[2]; if (dz < -0.2f || dz > 1.9f) continue;
+                        float dx = q[0] - l_[0], dy = q[1] - l_[1]; if (dx * dx + dy * dy < rr_ * rr_) { hit_ = 1; break; }
+                    } }
+            }
+            memcpy(pv_, cur_, sizeof pv_); pst_ = EN.st; pe_ = ECUR;
+            if (any_) r_ = hit_;
+        }
+        return r_;      // gilbert_boss: on the table his reach is short; the bed hangs above him so the height band is wider      // generous reach: his swings are wide
     }
     const Char *c = &ENEMY; float cs = cosf(EN.face), sn = sinf(EN.face);
     if (c->hand >= 0 && c->wbone >= 0) { float A[3], B[3]; char_blade(c, EN.p.x, EN.p.y, EN.p.z, EN.face, A, B); if (blade_hits_h(A, B, pl->x, pl->y, pl->z, 0.62f, 0.1f, 1.7f)) return 1; }
@@ -11904,7 +13003,92 @@ static void gb_table_follow(void) {      // gilbert_table: the bed he is strappe
         m[12] = px + c * tx - sn * ty + g_gbb[1] * cosf(pf); m[13] = py + sn * tx + c * ty + g_gbb[1] * sinf(pf); m[14] = o[14] + g_gbb[0] + (pz - GB_Z_SIT) - 0.9f * e;
     }
 }
+static void gb_leap_step(void) {      // gb_ai: Gilbert's leap to the other floor: he is thrown along an arc from where he took off to where he lands, while the jump animation plays
+    float f = EN.st / (EN.sdur > 0.1f ? EN.sdur : 1.0f), s = (f - 0.18f) / 0.44f; if (s <= 0.0f) return; if (s > 1.0f) s = 1.0f; float e = s * s * (3.0f - 2.0f * s);
+    EN.p.x = g_gb_l0[0] + (g_gb_l1[0] - g_gb_l0[0]) * e; EN.p.y = g_gb_l0[1] + (g_gb_l1[1] - g_gb_l0[1]) * e;
+    EN.p.z = s >= 1.0f ? g_gb_l1[2] : g_gb_l0[2] + (g_gb_l1[2] - g_gb_l0[2]) * e + 4.0f * s * (1.0f - s) * 2.4f; EN.p.vz = 0.0f; EN.p.grounded = s >= 1.0f;
+}
 static int cb_hard_on(void) { static int easy_ = -1; if (easy_ < 0) easy_ = fopen_exists("ux0:data/bbpsx/cb_easy.txt"); return !easy_ && cb_map() && BS.phase == 3 && BS.fight && EN.state != E_DEAD; }      // cb_hard: the harder Cleric Beast (an empty ux0:data/bbpsx/cb_easy.txt turns it off)
+// ---- gh_redo: what makes Gehrman fight like Gehrman and not like Gascoigne. The Burial Blade's two forms, a pistol that staggers, quicksteps, and from half health the Quickening (blue aura, ghost trails, speed) with an arcane blast that goes off on the seventh second.
+static void gh_fx_reset(void) { memset(g_gwv, 0, sizeof g_gwv); memset(g_gring, 0, sizeof g_gring); memset(g_gbl, 0, sizeof g_gbl); g_gh_arc_cd = 14.0f; g_gh_pull_cd = 4.0f; g_gh_step_cd = 0.0f; g_gh_seq = 0; g_gh_seq_t = 0.0f; g_gh_qdone = 0; g_gh_shit = 0; for (int i = 0; i < 6; i++) g_gh_tr[i][3] = 99.0f; g_pl_pull[0] = g_pl_pull[1] = 0.0f; }
+static void gh_ring_add(float x, float y, float z, float sp, float dm) { for (int i = 0; i < 4; i++) if (!g_gring[i].a) { GhRing *r = &g_gring[i]; r->x = x; r->y = y; r->z = z; r->r = 0.6f; r->sp = sp; r->dm = dm; r->t = 0.0f; r->a = 1; r->hit = 0; return; } }
+static void gh_blast_add(float x, float y, float z, float fuse) { for (int i = 0; i < 4; i++) if (!g_gbl[i].on) { g_gbl[i].x = x; g_gbl[i].y = y; g_gbl[i].z = z; g_gbl[i].fuse = fuse; g_gbl[i].on = 1; return; } }
+static float gh_fx_tick(float dt, const Player *pl, int invuln) {      // every frame of the fight: cooldowns, gusts, ground blasts, the Quickening's aura and ghost trails
+    float dmg = 0.0f;
+    for (int i = 0; i < 3; i++) { GhWave *w = &g_gwv[i]; if (!w->on) continue;      /* gh_wave: a crescent of pale light, 3.4 m wide, flying 16 m a second for 1.3 s; it hits once, and a roll goes through it */
+        w->t += dt; w->x += w->dx * 16.0f * dt; w->y += w->dy * 16.0f * dt; if (w->t > 1.3f) { w->on = 0; continue; }
+        for (int q = -3; q <= 3; q++) { float s_ = q * 0.55f, b_ = 0.22f * s_ * s_; float px_ = w->x - w->dy * s_ - w->dx * b_, py_ = w->y + w->dx * s_ - w->dy * b_; glow_add_c(px_, py_, w->z + 1.05f, 0.55f - 0.05f * (q < 0 ? -q : q), 1); if (frand() < 0.5f) spark_spawn(px_ + (frand() - 0.5f) * 0.3f, py_ + (frand() - 0.5f) * 0.3f, w->z + 0.7f + frand() * 0.8f, 0.1f); }
+        if (!w->hit && !invuln) { float rx_ = pl->x - w->x, ry_ = pl->y - w->y, al_ = rx_ * w->dx + ry_ * w->dy, la_ = -rx_ * w->dy + ry_ * w->dx; if (fabsf(al_) < 0.9f && fabsf(la_) < 1.8f && fabsf(pl->z - w->z) < 2.0f) { w->hit = 1; dmg += 22.0f; } } }
+    if (g_gh_arc_cd > 0.0f) g_gh_arc_cd -= dt; if (g_gh_pull_cd > 0.0f) g_gh_pull_cd -= dt; if (g_gh_step_cd > 0.0f) g_gh_step_cd -= dt;
+    for (int i = 0; i < 4; i++) { GhRing *r = &g_gring[i]; if (!r->a) continue; r->t += dt; r->r += r->sp * dt; if (r->t > 1.3f) { r->a = 0; continue; }
+        int ns = 5 + (int)(r->r * 0.9f); for (int q = 0; q < ns; q++) { float a_ = frand() * 6.2832f; spark_spawn(r->x + cosf(a_) * r->r, r->y + sinf(a_) * r->r, r->z + 0.15f + frand() * 0.35f, 0.12f); }
+        if (frand() < 0.5f) { float a_ = frand() * 6.2832f; smoke_puff(r->x + cosf(a_) * r->r, r->y + sinf(a_) * r->r, r->z + 0.1f, 0.7f); }
+        float d_ = hypotf(pl->x - r->x, pl->y - r->y);
+        if (!r->hit && !invuln && r->dm > 0.0f && fabsf(d_ - r->r) < 0.8f && fabsf(pl->z - r->z) < 1.1f) { r->hit = 1; dmg += r->dm; if (d_ > 0.1f) { g_pl_pull[0] += (pl->x - r->x) / d_ * 1.1f; g_pl_pull[1] += (pl->y - r->y) / d_ * 1.1f; } }
+    }
+    for (int i = 0; i < 4; i++) { GhBlast *b = &g_gbl[i]; if (!b->on) continue; b->fuse -= dt;
+        for (int q = 0; q < 5; q++) { float a_ = frand() * 6.2832f; spark_spawn(b->x + cosf(a_) * 2.0f, b->y + sinf(a_) * 2.0f, b->z + 0.15f, 0.1f); }
+        glow_add_c(b->x, b->y, b->z + 0.3f, 0.5f + 1.3f * (1.0f - (b->fuse > 0.0f ? b->fuse : 0.0f)), 1);
+        if (b->fuse <= 0.0f) { b->on = 0; ground_impact(b->x, b->y, b->z, 0.8f); for (int q = 0; q < 14; q++) spark_spawn(b->x + (frand() - 0.5f) * 3.0f, b->y + (frand() - 0.5f) * 3.0f, b->z + 0.3f + frand() * 1.6f, 0.15f); snd_play_at(S_CB_IMPACT, b->x, b->y, 1.2f);
+            if (!invuln && hypotf(pl->x - b->x, pl->y - b->y) < 2.1f && fabsf(pl->z - b->z) < 1.6f) dmg += 24.0f; }
+    }
+    if (g_gh_seq > 0) { g_gh_seq_t -= dt; if (g_gh_seq_t <= 0.0f) { gh_blast_add(pl->x, pl->y, pl->z, 0.95f); g_gh_seq--; g_gh_seq_t = 0.7f; } }
+    if (g_gh_torch && BS.fight && EN.state != E_DEAD) {      // the Quickening: a blue aura, and the places he has just been glow behind him
+        glow_add_c(EN.p.x, EN.p.y, EN.p.z + 1.1f, 1.5f + 0.25f * sinf(g_glow_t * 9.0f), 1);
+        if (frand() < 14.0f * dt) spark_spawn(EN.p.x + (frand() - 0.5f) * 0.9f, EN.p.y + (frand() - 0.5f) * 0.9f, EN.p.z + 0.2f + frand() * 1.7f, 0.1f);
+        if (hypotf(EN.p.x - g_gh_lx, EN.p.y - g_gh_ly) > 0.7f) { for (int i = 5; i > 0; i--) memcpy(g_gh_tr[i], g_gh_tr[i - 1], sizeof g_gh_tr[i]); g_gh_tr[0][0] = EN.p.x; g_gh_tr[0][1] = EN.p.y; g_gh_tr[0][2] = EN.p.z; g_gh_tr[0][3] = 0.0f; g_gh_lx = EN.p.x; g_gh_ly = EN.p.y; }
+        for (int i = 0; i < 6; i++) { g_gh_tr[i][3] += dt; if (g_gh_tr[i][3] < 0.4f) glow_add_c(g_gh_tr[i][0], g_gh_tr[i][1], g_gh_tr[i][2] + 1.0f, 0.95f * (1.0f - g_gh_tr[i][3] / 0.4f), 1); }
+    }
+    return dmg;
+}
+static float gh_arms_t(int a) {      /* gh_arms: the moment of an animation where his two hands are furthest apart (arms out), found once */
+    static int ca_ = -2; static const void *ck_ = NULL; static float ct_ = 0.0f;
+    if (a < 0) return 0.0f;
+    if (ca_ != a || ck_ != (const void *)ENEMY.anim) {
+        ca_ = a; ck_ = (const void *)ENEMY.anim; ct_ = 0.0f; const HAnim *A = &ENEMY.anim[a];
+        if (A->m && A->nf >= 4 && ENEMY.nAt >= 2) { size_t per = (size_t)(ENEMY.nB + ENEMY.nAt) * 12; float best = -1.0f; for (uint32_t f = 0; f < A->nf; f++) { const float *p = A->m + f * per + (size_t)ENEMY.nB * 12, *q = p + 12; float d = (p[3]-q[3])*(p[3]-q[3]) + (p[7]-q[7])*(p[7]-q[7]) + (p[11]-q[11])*(p[11]-q[11]); if (d > best) { best = d; ct_ = (float)f / A->fps; } } }
+        { char t_[100]; snprintf(t_, sizeof t_, "gehrman: arms out at %.2f s of anim %d", ct_, a); maplog("%s%s", t_, ""); }
+    }
+    return ct_;
+}
+static float gh_move_fx(const BMove *m, float f, float dt, const Player *pl, int invuln, float dist) {      // the move being played: what its flags add
+    float dmg = 0.0f, cs = cosf(EN.face), sn = sinf(EN.face); int imp = m->nwin > 0 ? (f >= m->win[0][0]) : (f >= 0.6f);
+    if (m->fl & BF_PULL) {      // the scythe pull: a chain of light from the blade drags you in while he winds up
+        if (f > 0.10f && f < 0.45f) {
+            float hd[3]; boss_fx_tip(&ENEMY, EN.p.x, EN.p.y, EN.p.z, EN.face, hd);
+            for (int q = 0; q < 5; q++) { float k_ = (q + frand()) / 5.0f; spark_spawn(hd[0] + (pl->x - hd[0]) * k_, hd[1] + (pl->y - hd[1]) * k_, hd[2] + (pl->z + 1.1f - hd[2]) * k_, 0.1f); }
+            if (!invuln && dist > 2.1f && boss_los(pl)) { float st_ = dist - 2.0f; if (st_ > 13.0f * dt) st_ = 13.0f * dt; g_pl_pull[0] -= (pl->x - EN.p.x) / dist * st_; g_pl_pull[1] -= (pl->y - EN.p.y) / dist * st_; }
+        }
+    }
+    if ((m->fl & BF_WAVE) && g_gh_torch && imp && !(EN.hits & 0x10)) {      /* gh_wave: below half health the wide swings throw a crescent of light along the way he faces */
+        EN.hits |= 0x10; for (int i = 0; i < 3; i++) if (!g_gwv[i].on) { GhWave *w = &g_gwv[i]; w->on = 1; w->hit = 0; w->t = 0.0f; w->dx = cs; w->dy = sn; w->x = EN.p.x + cs * 1.2f; w->y = EN.p.y + sn * 1.2f; w->z = EN.p.z; snd_play_at(S_BOSS_SWING, EN.p.x, EN.p.y, 1.4f); break; } }
+    if (m->fl & BF_CHARGE) {      // the charged slam: light gathers in the blade, then a shockwave rolls out from where it lands
+        if (f < 0.5f) { float hd[3]; boss_fx_tip(&ENEMY, EN.p.x, EN.p.y, EN.p.z, EN.face, hd); glow_add_c(hd[0], hd[1], hd[2], 0.3f + 1.2f * f * 2.0f, 1); if (frand() < 0.6f) spark_spawn(hd[0] + (frand() - 0.5f) * 0.4f, hd[1] + (frand() - 0.5f) * 0.4f, hd[2] + (frand() - 0.5f) * 0.4f, 0.1f); }
+        if (imp && !(EN.hits & 0x20)) { EN.hits |= 0x20; gh_ring_add(EN.p.x + cs * 1.4f, EN.p.y + sn * 1.4f, EN.p.z, 8.0f, 18.0f); g_shake = g_shake > 0.5f ? g_shake : 0.5f; }
+    }
+    if (m->fl & BF_GUST) {      // the leap: it lands and the wind rolls out in two rings (below a quarter health the ground then blasts where you stand, three times)
+        if (imp && !(EN.hits & 0x20)) { EN.hits |= 0x20; gh_ring_add(EN.p.x, EN.p.y, EN.p.z, 6.5f, 13.0f); gh_ring_add(EN.p.x, EN.p.y, EN.p.z, 9.5f, 13.0f); snd_play_at(S_CB_IMPACT, EN.p.x, EN.p.y, 1.3f); g_shake = g_shake > 0.6f ? g_shake : 0.6f; if (g_gh_torch && EN.hp < GH_HP * 0.25f) { g_gh_seq = 3; g_gh_seq_t = 0.35f; } }
+    }
+    if (m->fl & BF_AIM) {      // the aimed shot: the pistol hand glows for the second he takes to line it up
+        float sf_ = m->shot_f < 1.0f ? m->shot_f : 0.5f; if (f < sf_) { glow_add_c(EN.p.x + cs * 0.5f, EN.p.y + sn * 0.5f, EN.p.z + 1.3f, 0.2f + 0.9f * f / sf_, 1); if (frand() < 0.5f) spark_spawn(EN.p.x + cs * 0.6f + (frand() - 0.5f) * 0.3f, EN.p.y + sn * 0.6f + (frand() - 0.5f) * 0.3f, EN.p.z + 1.3f + (frand() - 0.5f) * 0.3f, 0.09f); }
+    }
+    if (m->fl & BF_QUICK) {      // the power-up: he screams, the shock throws you back
+        glow_add_c(EN.p.x, EN.p.y, EN.p.z + 1.2f, 0.8f + 2.0f * f, 1); if (frand() < 0.8f) spark_spawn(EN.p.x + (frand() - 0.5f) * 1.2f, EN.p.y + (frand() - 0.5f) * 1.2f, EN.p.z + 0.2f + frand() * 1.8f, 0.12f);
+        if (f > 0.4f && !(EN.hits & 0x40)) { EN.hits |= 0x40; gh_ring_add(EN.p.x, EN.p.y, EN.p.z, 11.0f, 8.0f); snd_play_at_p(S_BOSS_YELL, EN.p.x, EN.p.y, 2.4f, 0.7f); g_shake = 0.9f; for (int q = 0; q < 16; q++) spark_spawn(EN.p.x + (frand() - 0.5f) * 1.4f, EN.p.y + (frand() - 0.5f) * 1.4f, EN.p.z + 0.2f + frand() * 1.8f, 0.14f); }
+        if (f > 0.4f && f < 0.65f && dist < 6.0f && dist > 0.1f) { g_pl_pull[0] += (pl->x - EN.p.x) / dist * 8.0f * dt; g_pl_pull[1] += (pl->y - EN.p.y) / dist * 8.0f * dt; }
+    }
+    if (m->fl & BF_ARC) {      // the arcane blast: he stands with his power gathering for six seconds, the ring on the ground shows how far it reaches, and it goes off on the seventh
+        const float R_ = 7.5f; float t_ = EN.st, k_ = t_ / 7.0f; if (k_ > 1.0f) k_ = 1.0f;
+        { float L_ = en_len(m->a) - 0.04f; if (L_ > 0.1f && EN.t_cur > L_) EN.t_cur = L_; }      /* the arcane blast plays the same animation as his Quickening (the Transform): it plays through once and the last pose is held while the power gathers */
+        glow_add_c(EN.p.x, EN.p.y, EN.p.z + 1.3f, 0.8f + 2.8f * k_, 1);
+        for (int q = 0; q < 2; q++) { float a_ = frand() * 6.2832f, r_ = 3.5f * (1.0f - k_) + 0.6f; spark_spawn(EN.p.x + cosf(a_) * r_, EN.p.y + sinf(a_) * r_, EN.p.z + 0.3f + frand() * 1.8f, 0.1f); }
+        for (int q = 0; q < 6; q++) { float a_ = frand() * 6.2832f; spark_spawn(EN.p.x + cosf(a_) * R_, EN.p.y + sinf(a_) * R_, EN.p.z + 0.15f, 0.1f); }
+        if (t_ >= 7.0f && !(EN.hits & 0x100)) { EN.hits |= 0x100; ground_impact(EN.p.x, EN.p.y, EN.p.z, 1.6f); gh_ring_add(EN.p.x, EN.p.y, EN.p.z, 14.0f, 0.0f); g_shake = 1.0f; snd_play_at(S_CB_IMPACT, EN.p.x, EN.p.y, 2.0f);
+            for (int q = 0; q < 30; q++) { float a_ = frand() * 6.2832f, r_ = frand() * R_; spark_spawn(EN.p.x + cosf(a_) * r_, EN.p.y + sinf(a_) * r_, EN.p.z + 0.3f + frand() * 2.0f, 0.16f); }
+            if (!invuln && dist < R_ && fabsf(pl->z - EN.p.z) < 3.0f) dmg += 52.0f; }
+    }
+    return dmg;
+}
 static float boss_update(float dt, const Player *pl, int invuln) {
     float dmg = 0.0f, mx = 0.0f, my = 0.0f;
     if (g_nbrk && ((BS.phase >= 2 && !strcasecmp(cur_map, "gascoignearena")) || (cb_map() && BS.phase == 3)) && EN.state != E_DEAD && (BS.sub == SUB_CHASE || BS.sub == SUB_ATTACK)) { static float tcd_ = 0.0f; tcd_ -= dt; if (tcd_ <= 0.0f) for (int k = 1; k <= (cb_map() ? 3 : 2); k++) { float d_ = 1.3f * (float)k; if (brk_boss(EN.p.x + cosf(EN.face) * d_, EN.p.y + sinf(EN.face) * d_, EN.p.z + 0.9f, cb_map() ? 1.2f : 0.8f, EN.p.x, EN.p.y)) { tcd_ = 0.7f; break; } } }      // brk_tomb: beast Gascoigne charges through the tombstones in his way
@@ -11924,8 +13108,11 @@ static float boss_update(float dt, const Player *pl, int invuln) {
     int cbh = cb_hard_on(), cbp2 = cbh && EN.hp < EN.hp_max * 0.5f;
     static int ghe_ = -1; if (ghe_ < 0) ghe_ = fopen_exists("ux0:data/bbpsx/gh_easy.txt");
     int ghh = !ghe_ && gh_map() && BS.fight && EN.state != E_DEAD, ghp2 = ghh && g_gh_torch;      /* gh_hard (gh_easy.txt turns it off) */
-    if (!ghh) { g_gh_chain = 0; g_gh_punish = 0.0f; g_gh_atkn = 0; g_pl_heal_go = g_pl_shot_go = g_pl_atk_go = 0; for (int q_ = 0; q_ < 4; q_++) g_ghf[q_].t = 0.0f; }
-    else {
+    static int gbe_ = -1; if (gbe_ < 0) gbe_ = fopen_exists("ux0:data/bbpsx/gb_easy.txt");      /* gb_ai: the harder, faster Gilbert (an empty gb_easy.txt turns it off) */
+    int gbf = !gbe_ && gb_map() && BS.phase == 5 && BS.fight && EN.state != E_DEAD, gbp2 = gbf && EN.hp < GB_HP * 0.5f, gbl = gbf ? boss_los(pl) : 1;
+    if (!gbf) { g_gb_leap = 0; g_gb_chain = 0; g_gb_lcd = 2.0f; } else if (g_gb_leap && BS.sub != SUB_ATTACK) g_gb_leap = 0;
+    if (!ghh && !gbf) { g_gh_chain = 0; g_gh_punish = 0.0f; g_gh_atkn = 0; g_pl_heal_go = g_pl_shot_go = g_pl_atk_go = 0; for (int q_ = 0; q_ < 4; q_++) g_ghf[q_].t = 0.0f; }
+    else if (ghh) {
         if (g_gh_pcd > 0.0f) g_gh_pcd -= dt;
         if (g_gh_atkwin > 0.0f) { g_gh_atkwin -= dt; if (g_gh_atkwin <= 0.0f) g_gh_atkn = 0; }
         if (g_pl_atk_go) { g_gh_atkn += g_pl_atk_go; g_pl_atk_go = 0; g_gh_atkwin = 3.0f; }
@@ -11933,17 +13120,31 @@ static float boss_update(float dt, const Player *pl, int invuln) {
         if (g_pl_roll_go) { g_pl_roll_go = 0; if (frand() < (ghp2 ? 0.7f : 0.5f)) { ev_ = 1; dl_ = 0.25f + frand() * 0.2f; } }      /* you rolled: he strikes where you land */
         if (g_pl_heal_go) { g_pl_heal_go = 0; if (frand() < 0.8f) { ev_ = 1; dl_ = 0.15f; } }      /* you drank: he punishes it */
         if (g_pl_shot_go) { g_pl_shot_go = 0; if (frand() < 0.4f) { ev_ = 1; dl_ = 0.2f; } }      /* you fired: he lunges at you */
-        if (ev_ && BS.sub == SUB_CHASE && g_gh_punish <= 0.0f && g_gh_pcd <= 0.0f) { g_gh_punish = dl_; g_gh_pcd = ghp2 ? 2.2f : 3.5f; }
+        if (ev_ && BS.sub == SUB_CHASE && g_gh_punish <= 0.0f && g_gh_pcd <= 0.0f) { g_gh_punish = dl_; g_gh_pcd = ghp2 ? 1.4f : 2.2f; }
         for (int q_ = 0; q_ < 4; q_++) { GhFire *f_ = &g_ghf[q_]; if (f_->t <= 0.0f) continue; f_->t -= dt;      /* the burning ground */
             if (frand() < 7.0f * dt) fire_spawn(f_->x + (frand() - 0.5f) * 1.7f, f_->y + (frand() - 0.5f) * 1.7f, f_->z + 0.05f, 0.45f + frand() * 0.35f);
             if (frand() < 4.0f * dt) ember_spawn(f_->x + (frand() - 0.5f) * 1.6f, f_->y + (frand() - 0.5f) * 1.6f, f_->z + 0.2f, 0.12f);
             { float fd_ = f_->t < 1.0f ? f_->t : 1.0f; glow_add(f_->x, f_->y, f_->z + 0.45f, 1.3f * fd_); }
-            f_->tick -= dt; if (f_->tick <= 0.0f && !invuln && hypotf(pl->x - f_->x, pl->y - f_->y) < 1.1f && fabsf(pl->z - f_->z) < 1.6f) { f_->tick = 0.6f; dmg += 7.0f; }
+            f_->tick -= dt; if (f_->tick <= 0.0f && !invuln && hypotf(pl->x - f_->x, pl->y - f_->y) < 1.1f && fabsf(pl->z - f_->z) < 1.6f) { f_->tick = 0.6f; g_burn_dmg += 7.0f; }
         }
+    }
+    if (gh_map() && BS.sub != SUB_DEAD) dmg += gh_fx_tick(dt, pl, invuln);
+    if (rl_map() && g_rom_have) { dmg += rom_tick(dt, pl, invuln); if (BS.sub != SUB_DEAD) dmg += moon_fx_tick(dt, pl, invuln); }      /* rom_fight (the bursts from the ground are the Moon Presence's water spouts) */
+    if (moon_map() && g_moon_have && BS.sub != SUB_DEAD) dmg += moon_fx_tick(dt, pl, invuln);      /* moon_unique */      // gh_redo
+    if (gbf) {      // gb_ai: phase 2: the fire he leaves behind burns on the library floor
+        if (g_gb_lcd > 0.0f) g_gb_lcd -= dt;
+        for (int q_ = 0; q_ < 4; q_++) { GhFire *f_ = &g_ghf[q_]; if (f_->t <= 0.0f) continue; f_->t -= dt;
+            if (frand() < 7.0f * dt) fire_spawn(f_->x + (frand() - 0.5f) * 1.7f, f_->y + (frand() - 0.5f) * 1.7f, f_->z + 0.05f, 0.45f + frand() * 0.35f);
+            if (frand() < 4.0f * dt) ember_spawn(f_->x + (frand() - 0.5f) * 1.6f, f_->y + (frand() - 0.5f) * 1.6f, f_->z + 0.2f, 0.12f);
+            { float fd_ = f_->t < 1.0f ? f_->t : 1.0f; glow_add(f_->x, f_->y, f_->z + 0.45f, 1.3f * fd_); }
+            f_->tick -= dt; if (f_->tick <= 0.0f && !invuln && hypotf(pl->x - f_->x, pl->y - f_->y) < 1.1f && fabsf(pl->z - f_->z) < 1.6f) { f_->tick = 0.6f; g_burn_dmg += 7.0f; } }
     }
     if (cbh && cbp2 && !g_cb_p2) { g_cb_p2 = 1; snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); cb_roar_shake(1.0f); EN.cool = 0.0f; maplog("cleric: second phase (longer combos, more lunges)%s%s", "", ""); }
     if (!cbh) { g_pl_roll_go = 0; if (!cb_map() || BS.sub == SUB_WAIT) { g_cb_intro = 0; g_cb_chain = 0; g_cb_p2 = 0; g_cb_punish = 0.0f; g_cb_rate_x = 1.0f; } }
     if (cbh) { if (g_cb_pcd > 0.0f) g_cb_pcd -= dt; if (g_pl_roll_go) { g_pl_roll_go = 0; if (BS.sub == SUB_CHASE && g_cb_punish <= 0.0f && g_cb_pcd <= 0.0f && frand() < (cbp2 ? 0.6f : 0.35f)) { g_cb_punish = 0.3f + frand() * 0.25f; g_cb_pcd = cbp2 ? 3.0f : 4.5f; } } }
+    if (g_ar_beam_cd > 0.0f) g_ar_beam_cd -= dt; if (g_ar_hop_cd > 0.0f) g_ar_hop_cd -= dt;
+    if (g_mp_drain_cd > 0.0f) g_mp_drain_cd -= dt; if (g_mp_open_t > 0.0f) g_mp_open_t -= dt;
+    if (g_mp_drain && BS.sub != SUB_ATTACK) { if (g_mp_drain == 2) { EN.cool = 4.5f; g_mp_open_t = 4.5f; g_cb_chain = 0; } g_mp_drain = 0; }      /* real_feel: after the drain he stands open for a few seconds: that is when you win the blood back */
     if (EN.cool > 0.0f) EN.cool -= dt;
     if (EN.dmg_t > 0.0f) { EN.dmg_t -= dt; if (EN.dmg_t <= 0.0f) EN.dmg_sum = 0; }
     if (BS.armor > 0.0f) BS.armor -= dt;
@@ -11963,7 +13164,7 @@ static float boss_update(float dt, const Player *pl, int invuln) {
         if (g_gi_req || (!g_gi_done && !cb_map() && GAS_ALIVE && !strcasecmp(cur_map, "gascoignearena") && dist < BOSS_TRIGGER && fabsf(pl->z - EN.p.z) < 4.0f)) { g_gi_req = 0; g_gi_done = 1; g_cut_t = 0.0f; g_cut_gas = 1; gi_snd_load(); music_boss(4); g_gi_z = EN.p.z; gi_cfg(); { float f1_ = -99, f2_ = -99, f3_ = -99, f4_ = -99; int o1_ = cw_floor(&world, GI_X, GI_Y, g_gi_z + 1.0f, &f1_), o2_ = cw_floor(&world, GI_X, GI_Y, g_gi_z - 0.5f, &f2_), o3_ = cw_floor(&world, GI_X, GI_Y, g_gi_z - 2.0f, &f3_), o4_ = cw_floor(&world, GI_X, GI_Y, 20.0f, &f4_); GILOG("gi: floor at rig: home z %.2f | below+1: %d %.2f | below-0.5: %d %.2f | below-2: %d %.2f | top: %d %.2f", g_gi_z, o1_, f1_, o2_, f2_, o3_, f3_, o4_, f4_); GILOG("gi: offsets %.2f %.2f %.2f | %.2f %.2f %.2f", g_gio[0], g_gio[1], g_gio[2], g_gio[3], g_gio[4], g_gio[5]); } EN.p.x = GI_X + g_gio[0]; EN.p.y = GI_Y + g_gio[1]; EN.face = gi_face(0.0f); maplog("cutscene: gas intro%s%s", "", ""); break; }
         if (dist < 28.0f) turn_to(&EN.face, want, 0.8f * dt);
         if (!gh_map() && (g_cb_hide ? hypotf(pl->x - CB_HOME_X, pl->y - CB_HOME_Y) : dist) < BOSS_TRIGGER && (g_cb_hide || fabsf(pl->z - EN.p.z) < 4.0f)) { BS.fight = 1; music_boss(1); BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = 1.2f; snd_play(S_FOG, 1.0f); if (cb_map()) snd_play_at(S_CB_HOWL, EN.p.x, EN.p.y, 1.6f);
-            if (cb_map() && BS.phase == 3 && !fopen_exists("ux0:data/bbpsx/cb_nointro.txt")) {      // cb_intro: he leaps in from where he stood and lands in front of you, then roars
+            if (cb_map() && !rom_map() && BS.phase == 3 && !fopen_exists("ux0:data/bbpsx/cb_nointro.txt")) {      // cb_intro: he leaps in from where he stood and lands in front of you, then roars
                 int kj_ = -1; for (int i = 0; i < P->n; i++) if (P->m[i].fl & BF_GAP) { kj_ = i; break; }
                 if (g_cb_hide && kj_ < 0) { g_cb_hide = 0; EN.p.x = CB_HOME_X; EN.p.y = CB_HOME_Y; }
                 if (kj_ >= 0) { g_cb_hide = 0; EN.face = want; g_cb_intro = 1; g_cb_landed = 0; { float ln_ = P->m[kj_].len > 0.3f ? P->m[kj_].len : 1.0f, sd_ = dist / 14.0f; if (sd_ < ln_) sd_ = ln_; g_cb_rate_x = ln_ / sd_; } boss_start_move(kj_, dist); { char t_[100]; snprintf(t_, sizeof t_, "cleric: intro leap from %.1f m", dist); maplog("%s%s", t_, ""); } }
@@ -11971,15 +13172,21 @@ static float boss_update(float dt, const Player *pl, int invuln) {
         break;
     case SUB_CHASE: {
         EN.state = E_CHASE;
-        turn_to(&EN.face, want, (cbh ? (cbp2 ? 10.0f : 8.5f) : (BS.phase >= 2 ? 7.5f : 5.5f)) * dt);
+        if (rl_map() && g_rom_have && g_rm_stage == 0 && !g_rm_fade) { float ta_ = want - EN.face; while (ta_ > 3.14159265f) ta_ -= 6.28318531f; while (ta_ < -3.14159265f) ta_ += 6.28318531f; turn_to(&EN.face, want, 0.7f * dt); EN.vx = EN.vy = 0.0f; if (fabsf(ta_) > 0.1f && P->run >= 0) en_play(P->run, ANIM_BLEND, 0); else if (EN.a_idle >= 0) en_play(EN.a_idle, ANIM_BLEND, 0); break; }      /* (turning: she walks her legs round as she turns, and idles once she faces you) */      /* rom_fight: phase one she stays where she is and lets her children come; she wakes when she is hurt enough to vanish */
+        turn_to(&EN.face, want, ((rl_map() && g_rom_have) ? 0.7f : (cbh ? (cbp2 ? 10.0f : 8.5f) : (gbf ? (gbp2 ? 10.0f : 8.5f) : (BS.phase >= 2 ? 7.5f : 5.5f)))) * dt);      /* rom_fight: she walks round slowly */
         if (BS.pend) { boss_begin_trans(); break; }
         int started = 0;
+        if (ghh && g_gh_torch && !g_gh_qdone && BS.phase == 1) { g_gh_qdone = 1; for (int i = 0; i < P->n; i++) if (P->m[i].fl & BF_QUICK) { boss_start_move(i, dist); started = 1; maplog("gehrman: the Quickening%s%s", "", ""); break; } }      // gh_redo: at half health he screams and the blue aura comes on
+        if (!started && ghh && g_pl_windup && dist < 4.5f && fabsf(ad) < 1.3f && g_gh_step_cd <= 0.0f && frand() < 7.0f * dt) {      // gh_redo: you wind up a swing: he quicksteps out of it
+            int ks_[8], nk_ = 0; for (int i = 0; i < P->n && nk_ < 8; i++) { const BMove *m = &P->m[i]; if ((m->fl & BF_STEP) && dist >= m->dmin && dist <= m->dmax) ks_[nk_++] = i; }
+            g_gh_step_cd = ghp2 ? 1.4f : 2.2f; if (nk_ > 0) { boss_start_move(ks_[(int)(frand() * nk_) % nk_], dist); started = 1; maplog("gehrman: quickstep%s%s", "", ""); }
+        }
         if (0 && g_pl_stagged && g_pvisc_n < 1 && dist <= 3.4f) { int kv = boss_pick_visc(dist); if (kv >= 0) { boss_start_move(kv, dist); BS.pvisc = 1; g_pvisc_go = 1; g_pvisc_n++; started = 1; } }      // the player is reeling: go for him
         if (!started && ghh && g_gh_punish > 0.0f) {      // gh_hard: you rolled / drank / fired - a beat later he strikes where you are
             g_gh_punish -= dt;
             if (g_gh_punish <= 0.0f && fabsf(ad) < 1.0f && !g_pl_stagged) {
                 int kk_ = -1, ng_ = 0, ok_[16];
-                for (int i = 0; i < P->n && i < 16; i++) { const BMove *m = &P->m[i]; if (m->fl & (BF_SHOOT | BF_BEHIND | BF_RETREAT | BF_GRAB)) continue; if (m->fl & BF_GAP) { if (dist >= 3.2f && dist <= 11.0f) kk_ = i; continue; } if (dist >= m->dmin && dist <= m->dmax) ok_[ng_++] = i; }
+                for (int i = 0; i < P->n && i < 16; i++) { const BMove *m = &P->m[i]; if (m->fl & (BF_SHOOT | BF_BEHIND | BF_RETREAT | BF_GRAB | BF_ARC | BF_QUICK | BF_PULL | BF_CHARGE)) continue; if (m->fl & BF_GAP) { if (dist >= 3.2f && dist <= 11.0f) kk_ = i; continue; } if (dist >= m->dmin && dist <= m->dmax) ok_[ng_++] = i; }
                 if (kk_ >= 0 && dist > 4.0f) { boss_start_move(kk_, dist); started = 1; }
                 else if (ng_ > 0) { boss_start_move(ok_[(int)(frand() * ng_) % ng_], dist); started = 1; }
                 else if (kk_ >= 0) { boss_start_move(kk_, dist); started = 1; }
@@ -12000,6 +13207,20 @@ static float boss_update(float dt, const Player *pl, int invuln) {
                 if (started) maplog("cleric: punishes the roll%s%s", "", "");
             }
         }
+        if (!started && gbf && g_gb_lcd <= 0.0f && EN.cool <= 0.0f && !g_pl_stagged && fabsf(pl->z - EN.p.z) > 2.2f && fabsf(pl->z - EN.p.z) < 9.0f && dist < 22.0f) {      // gb_leap: you are on the other floor: he jumps to where you are (up the balcony or down to the ground), landing beside you
+            int kj_ = -1; for (int i = 0; i < P->n; i++) if ((P->m[i].fl & BF_GAP) && (unsigned)P->m[i].a < ENEMY.nA && strstr(ENEMY.anim[P->m[i].a].name, "Jump")) { kj_ = i; break; }
+            float bx_ = 0.0f, by_ = 0.0f, bz_ = 0.0f, bd_ = 1.0e9f; int ok_ = 0;
+            for (int k_ = 0; kj_ >= 0 && k_ < 12; k_++) { float a_ = k_ * 0.5236f, tx_ = pl->x + cosf(a_) * 2.3f, ty_ = pl->y + sinf(a_) * 2.3f, fz_; if (!cw_floor(&world, tx_, ty_, pl->z + 1.5f, &fz_) || fabsf(fz_ - pl->z) > 0.6f) continue;
+                float o_[3] = { pl->x, pl->y, pl->z + 1.0f }, v_[3] = { cosf(a_), sinf(a_), 0.0f }, th_; if (cw_raycast(&world, o_, v_, 2.3f, &th_)) continue;
+                float d_ = hypotf(tx_ - EN.p.x, ty_ - EN.p.y); if (d_ < bd_) { bd_ = d_; bx_ = tx_; by_ = ty_; bz_ = fz_; ok_ = 1; } }
+            if (ok_) { g_gb_leap = 1; g_gb_l0[0] = EN.p.x; g_gb_l0[1] = EN.p.y; g_gb_l0[2] = EN.p.z; g_gb_l1[0] = bx_; g_gb_l1[1] = by_; g_gb_l1[2] = bz_; g_gb_lcd = gbp2 ? 4.0f : 6.0f; EN.face = atan2f(by_ - EN.p.y, bx_ - EN.p.x); boss_start_move(kj_, dist); started = 1; { char t_[100]; snprintf(t_, sizeof t_, "gilbert: leaps %s, %.1f m", bz_ > EN.p.z ? "up" : "down", bd_); maplog("%s%s", t_, ""); } }
+            else g_gb_lcd = 1.5f;
+        }
+        if (!started && EN.cool <= 0.0f && moon_map() && g_moon_have && BS.phase == 3 && g_mp_drain_cd <= 0.0f && !g_cb_intro && EN.hp < EN.hp_max * 0.7f && dist < 16.0f && !g_pl_stagged) {      /* real_feel: the Moon Presence's blood drain: a roar that takes you down to 1 health, all of it winnable back by hitting him */
+            int rk_ = -1, ra_ = cpick(cb_char(), "Scream1"); for (int i = 0; i < P->n; i++) if (P->m[i].a == ra_ && ra_ >= 0) rk_ = i;
+            g_mp_drain_cd = 45.0f;
+            if (rk_ >= 0) { g_mp_drain = 1; g_cb_rate_x = 0.8f; boss_start_move(rk_, dist); snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); started = 1; maplog("moon presence: blood drain%s%s", "", ""); }
+        }
         if (!started && EN.cool <= 0.0f) {
             float tot = 0.0f, wts[16];
             for (int i = 0; i < P->n; i++) {
@@ -12007,7 +13228,14 @@ static float boss_update(float dt, const Player *pl, int invuln) {
                 if (dist < m->dmin || dist > m->dmax) w = 0.0f;
                 if (m->fl & BF_BEHIND) { if (fabsf(ad) < 1.9f) w = 0.0f; } else if (fabsf(ad) > 0.9f && !(m->fl & BF_RETREAT)) w = 0.0f;
                 if (i == BS.last_mv) w *= 0.25f;
-                if (cbh && (m->fl & BF_GAP) && dist > 7.0f) w *= cbp2 ? 3.5f : 2.2f;      // cb_hard: he closes a gap far more often
+                if (gh_map() && !ghh && (m->fl & (BF_ARC | BF_QUICK))) w = 0.0f;
+                if (ghh && (m->fl & BF_WAVE) && dist > 3.3f) { if (!g_gh_torch) w = 0.0f; else w *= 0.7f; }      /* gh_wave: from a distance only once the swings throw light */
+                if (ghh) { if (m->fl & BF_QUICK) w = 0.0f; if ((m->fl & BF_PULL) && (g_gh_pull_cd > 0.0f || !boss_los(pl))) w = 0.0f; if (m->fl & BF_ARC) w = (ghp2 && BS.phase == 1 && g_gh_arc_cd <= 0.0f) ? 2.5f : 0.0f; }      // gh_redo
+                if (g_amyg_on && ((m->fl & BF_BEAM) && (g_ar_beam_cd > 0.0f || g_ar_rng))) w = 0.0f;      // amyg_variety
+                if (g_amyg_on && ((m->fl & BF_RETREAT) && (g_ar_hop_cd > 0.0f || g_ar_rng))) w = 0.0f;
+                if (g_amyg_on && (m->fl & BF_RETREAT) && boss_back_free() < 2.6f) w = 0.0f;      // amyg_unstick: never hop backwards into a wall or corner
+                if (gbf && (m->fl & BF_GAP)) { if (dist > 6.0f) w *= gbp2 ? 3.0f : 2.0f; if (!gbl) w = 0.0f; }      // gb_ai: he closes the gap fast, and never leaps at a wall
+                if (cbh && (m->fl & BF_GAP) && dist > 7.0f) w *= cbp2 ? 3.5f : 2.2f; if (moon_map() && (m->fl & BF_GAP) && !(m->fl & BF_RETREAT) && dist > 3.5f) w *= 2.0f;      /* moon_moves: he dives in from a short way off too */      // cb_hard: he closes a gap far more often
                 if (bb_map() && BS.nostag && (m->fl & BF_GAP)) w = 0.0f;      // never the jump straight after a visceral
                 if (g_pl_windup && (m->fl & BF_SHOOT) && (m->fl & BF_PURE) && !(m->fl & BF_RETREAT)) w *= 4.0f;      // he reads your swing and shoots into it
                 wts[i] = w; tot += w;
@@ -12019,43 +13247,94 @@ static float boss_update(float dt, const Player *pl, int invuln) {
             }
         }
         if (!started) {
-            static int close_ = 0; if (dist < 1.45f) close_ = 1; else if (dist > 1.9f) close_ = 0;      // boss_near: run / idle with a dead band, so the animation does not flip every frame at the edge
-            if (!close_) { float sp_ = g_pl_stagged ? 2.6f : 1.0f; mx = cosf(EN.face) * P->runv * sp_; my = sinf(EN.face) * P->runv * sp_; en_play(P->run, ANIM_BLEND, 0); }
-            else en_play(P->idle, ANIM_BLEND, 0);
+            static int close_ = 0; if (dist < 1.45f || g_mp_open_t > 0.0f) close_ = 1; else if (dist > 1.9f) close_ = 0;      // boss_near: run / idle with a dead band, so the animation does not flip every frame at the edge
+            if (!close_) { float sp_ = g_pl_stagged ? 2.6f : (ghh ? 1.15f : moon_map() && !g_moon_form ? 1.1f : moon_map() ? 1.25f : gbf ? (gbp2 ? 1.3f : 1.15f) : 1.0f); mx = cosf(EN.face) * P->runv * sp_; my = sinf(EN.face) * P->runv * sp_; en_play(P->run, ANIM_BLEND, 0);
+                if (g_amyg_on || gbf) {      // amyg_unstick (gilbert too: he also goes round a pillar or a stair when he cannot see you): he runs but does not get anywhere (a corner, a fence): after 0.7 s he side-steps along the freest direction for a moment
+                    g_us_run += dt;
+                    if (g_us_t > 0.0f) { g_us_t -= dt; mx = g_us_dx * P->runv; my = g_us_dy * P->runv; }
+                    else if (g_us_run >= 0.7f) {
+                        float mv_ = hypotf(EN.p.x - g_us_x, EN.p.y - g_us_y); g_us_x = EN.p.x; g_us_y = EN.p.y; g_us_run = 0.0f;
+                        if ((mv_ < 0.3f || (gbf && !gbl)) && dist > 2.5f) {
+                            float best_ = -1.0f, ba_ = EN.face; for (int k_ = 0; k_ < 8; k_++) { float a_ = EN.face + k_ * 0.785398f, fr_ = boss_free(a_, 6.0f); float tw_ = cosf(a_ - want); fr_ += 0.4f * tw_; if (fr_ > best_ && boss_free(a_, 6.0f) > 1.5f) { best_ = fr_; ba_ = a_; } }
+                            g_us_dx = cosf(ba_); g_us_dy = sinf(ba_); g_us_t = 0.9f; maplog("amyg: stuck, steps out%s%s", "", "");
+                        }
+                    }
+                }
+            } else { en_play(P->idle, ANIM_BLEND, 0); g_us_run = 0.0f; g_us_x = EN.p.x; g_us_y = EN.p.y; g_us_t = 0.0f; }
         }
         break; }
     case SUB_ATTACK: {
         if (BS.pend && gb_map() && BS.phase == 4) { boss_begin_trans(); break; }      // gb_breakfree: tearing free cuts off whatever he was doing
-        const BMove *m = &P->m[BS.mv]; EN.st += dt; float f = EN.st / EN.sdur;
+        const BMove *m = &P->m[BS.mv]; { float wp_ = 1.0f; if (ghh && BS.phase == 1 && m->nwin > 0 && !(m->fl & (BF_SHOOT | BF_GAP | BF_QUICK | BF_ARC | BF_STEP))) { float f0_ = EN.st / EN.sdur; if (f0_ < m->win[0][0] * 0.8f) wp_ = 0.72f; else if (f0_ < m->win[m->nwin - 1][1]) wp_ = 1.45f; } EN.st += dt * wp_; g_gh_warp = wp_; }      /* gh_delay: the scythe is held back, then comes round much faster than it was raised (the real fight's delayed swings) */
+        float f = EN.st / EN.sdur;
         float trk = (m->fl & BF_PURE) ? (m->shot_f < 1.0f ? m->shot_f : 0.5f) : 0.3f; if (cbh && !(m->fl & BF_GAP)) trk = cbp2 ? 0.5f : 0.42f;      // cb_hard: he keeps turning with you through the wind-up (the last part of the swing stays fixed)
-        if (f < trk && !(m->fl & BF_RETREAT)) turn_to(&EN.face, want, (cbh ? (cbp2 ? 9.0f : 7.5f) : (BS.phase >= 2 ? 6.0f : 5.0f)) * dt);
+        if (f < trk && !(m->fl & BF_RETREAT)) turn_to(&EN.face, want, ((rl_map() && g_rom_have) ? 0.7f : (cbh ? (cbp2 ? 9.0f : 7.5f) : (BS.phase >= 2 ? 6.0f : 5.0f))) * dt);      /* rom_fight: Rom turns slowly, even while winding up */
         if (g_cb_intro == 1) { float fh_ = cb_land_f(m), rem_ = EN.sdur * fh_ - EN.st; turn_to(&EN.face, want, 8.0f * dt); if (rem_ > 0.15f && dist > 0.1f) { float tr_ = dist - 3.0f; if (tr_ < 0.0f) tr_ = 0.0f; EN.vx = dx / dist * tr_ / rem_; EN.vy = dy / dist * tr_ / rem_; } else EN.vx = EN.vy = 0.0f; }      // cb_intro: he steers the leap to land a few metres in front of you
         mx = EN.vx; my = EN.vy;
-        if (dist < EN.bod + 0.4f && (mx * dx + my * dy) > 0.0f) mx = my = 0.0f;
+        if (dist < ((moon_map() && g_moon_have) ? EN.bod * 0.45f : EN.bod + 0.4f) && (mx * dx + my * dy) > 0.0f) mx = my = 0.0f;      /* moon_shape: he comes right up to you (you can stand under him now) */
+        if (g_gb_leap) mx = my = 0.0f;      // (gb_leap: the arc moves him, not the animation's own travel)
+        if (g_amyg_on && (m->fl & BF_RETREAT) && boss_back_free() < 1.0f) mx = my = 0.0f;
         int aoe_ = !(m->fl & (BF_GRAB | BF_SHOOT | BF_RETREAT)) && !(gb_map() && BS.phase == 4) && (((m->fl & BF_GAP) && dist < 3.8f && fabsf(pl->z - EN.p.z) < 2.2f) || ((m->dmg >= 45.0f || (m->fl & BF_BODY)) && dist < 3.0f && fabsf(pl->z - EN.p.z) < 2.0f));      /* boss_aoe: jump landings and heavy swings hurt everything close round him, not only what the blade touches */
+        int los_ = !(g_amyg_on || gbf) || boss_los(pl);      // amyg_los (and Gilbert: a pillar blocks his blows)
         for (int w = 0; w < m->nwin; w++)
-            if (!g_cb_intro && f >= m->win[w][0] && f <= m->win[w][1] && !(EN.hits & (1 << w)) && (aoe_ || boss_connects(pl, m, dist) || (BS.pvisc && g_pl_stagged && dist < EN.bod + 2.6f))) { EN.hits |= 1 << w; if (aoe_) ground_impact(EN.p.x + cosf(EN.face) * 1.2f, EN.p.y + sinf(EN.face) * 1.2f, EN.p.z, 0.6f); if (!invuln) { int pv_ = BS.pvisc && g_pl_stagged; dmg += m->dmg * (pv_ ? BOSS_PVISC_MULT : 1.0f) * (gh_map() && g_gh_torch ? 1.35f : 1.0f) * (cbp2 ? 1.15f : 1.0f); if (pv_) g_pl_visc_hit = 1; } }
-        if ((m->fl & BF_SHOOT) && !BS.shot_done && f >= m->shot_f) { BS.shot_done = 1; if (boss_shot(pl) && !invuln) { if (g_pl_windup && g_pstag_cd <= 0.0f && !g_pl_stagged) { g_pl_stag_req = 1; dmg += BOSS_SHOT_DMG * 0.4f; } else dmg += BOSS_SHOT_DMG * 1.05f; } }
-        ENEMY.show_pistol = (m->fl & BF_SHOOT) && f > 0.1f && f < 0.92f;
-        wa = m->wa; wt = EN.st * boss_rate(m);
+            if (!g_cb_intro && los_ && f >= m->win[w][0] && f <= m->win[w][1] && !(EN.hits & (1 << w)) && (aoe_ || boss_connects(pl, m, dist) || (BS.pvisc && g_pl_stagged && dist < EN.bod + 2.6f))) { EN.hits |= 1 << w; if (aoe_) ground_impact(EN.p.x + cosf(EN.face) * 1.2f, EN.p.y + sinf(EN.face) * 1.2f, EN.p.z, 0.6f); if (!invuln) { int pv_ = BS.pvisc && g_pl_stagged; dmg += m->dmg * (pv_ ? BOSS_PVISC_MULT : 1.0f) * (gh_map() && g_gh_torch ? 1.35f : 1.0f) * (cbp2 ? 1.15f : 1.0f) * limb_atk_k(); if (pv_) g_pl_visc_hit = 1; } }
+        if (gbf && (m->fl & BF_GAP) && !(EN.hits & 0x80) && f > 0.1f && f < 0.7f && gbl && dist < EN.bod + 0.9f && fabsf(pl->z - EN.p.z) < 1.6f && !invuln && !g_pl_stagged) { EN.hits |= 0x80; dmg += 7.0f; }      // gb_ai: even the dash itself nicks you if it runs into you
+        if (gbp2 && (m->fl & BF_GAP) && f > 0.15f && f < 0.8f) { g_gb_ft -= dt; if (g_gb_ft <= 0.0f) { g_gb_ft = 0.28f; int sl_ = 0; for (int q_ = 0; q_ < 4; q_++) { if (g_ghf[q_].t <= 0.0f) { sl_ = q_; break; } if (g_ghf[q_].t < g_ghf[sl_].t) sl_ = q_; } g_ghf[sl_].x = EN.p.x; g_ghf[sl_].y = EN.p.y; g_ghf[sl_].z = EN.p.z; g_ghf[sl_].t = 5.0f; g_ghf[sl_].tick = 0.4f; } }      // gb_ai: phase 2: his dashes leave a trail of fire
+        if (m->fl & BF_BEAM) dmg += beam_step(pl, f, dt, invuln);
+        if (g_mp_drain == 1 && f >= 0.5f) { g_mp_drain = 2; g_mp_drain_req = 1; cb_roar_shake(1.0f); }
+        if ((m->fl & BF_METEOR) && f >= 0.56f && !(EN.hits & 0x400)) { EN.hits |= 0x400; rom_meteors(pl); cb_roar_shake(0.5f); ground_impact(EN.p.x + cosf(EN.face) * 3.0f, EN.p.y + sinf(EN.face) * 3.0f, EN.p.z, 1.2f); }      /* rom_fight: her body comes down, the crystals start to fall */
+        if ((m->fl & BF_ICE) && f >= 0.35f && !(EN.hits & 0x400)) { EN.hits |= 0x400; g_mp_spq = g_rm_stage >= 2 ? 6 : 4; g_mp_spt = 0.1f; }      /* on her back: crystals burst from the ground under you, one after another */
+        if ((m->fl & BF_BLAST) && f >= 0.56f && !(EN.hits & 0x400)) {      /* the burst as she lands: everything within about 8 m of her */
+            EN.hits |= 0x400; glow_add_c(EN.p.x, EN.p.y, EN.p.z + 1.5f, 8.0f, 1); ground_impact(EN.p.x, EN.p.y, EN.p.z, 1.6f); cb_roar_shake(1.0f); if (g_flash < 0.5f) g_flash = 0.5f; snd_play_at(S_CB_IMPACT, EN.p.x, EN.p.y, 1.7f);
+            for (int j = 0; j < 44; j++) { float a_ = frand() * 6.2832f, r_ = 2.0f + frand() * 6.5f; spark_spawn(EN.p.x + cosf(a_) * r_, EN.p.y + sinf(a_) * r_, EN.p.z + frand() * 2.5f, 0.16f); }
+            if (!invuln && dist < EN.bod + 5.0f && fabsf(pl->z - EN.p.z) < 3.0f) dmg += 42.0f;
+        }
+        if ((m->fl & BF_ORB) && moon_map()) { int n_ = g_moon_form ? 5 : 3; for (int k_ = 0; k_ < n_; k_++) if (f >= 0.36f + 0.07f * k_ && !(EN.hits & (0x400 << k_))) { EN.hits |= 0x400 << k_; moon_orb(pl, k_); } }      /* moon_unique: the volley of blood orbs */
+        if (moon_map() && g_moon_have && g_moon_form && m->nwin > 0 && f >= m->win[0][0] && !(EN.hits & 0x10000) && (m->a == cpick(cb_char(), "PalmSlam") || m->a == cpick(cb_char(), "RearUpSlam") || m->a == cpick(cb_char(), "JumpSlam"))) { EN.hits |= 0x10000; g_mp_spq = 3; g_mp_spt = 0.35f; }      /* moon_unique: second form, a slam brings the water up under you */
+        if (moon_map() && g_moon_have && !invuln && !(EN.hits & 0x200) && ENEMY.skinned && ENEMY.rest && (m->a == cpick(cb_char(), "SpinSweep") || m->a == cpick(cb_char(), "WhipLash"))) {      /* tail_hit: the whole length of his tails hurts while he spins or whips them, not just the reach in front of his body. Every 5th vertex of the tails (the part of the model behind his hips) is tested against you where it really is this frame */
+            float f0_ = m->nwin > 0 ? m->win[0][0] - 0.06f : 0.2f, f1_ = m->nwin > 0 ? m->win[m->nwin - 1][1] + 0.1f : 0.8f;
+            if (f >= f0_ && f <= f1_) {
+                float cs_ = cosf(EN.face), sn_ = sinf(EN.face), sc_ = ENEMY.scale > 0.0f ? ENEMY.scale : 1.0f, rr_ = 0.45f + 0.15f * sc_;
+                for (uint32_t v_ = 0; v_ < ENEMY.nV; v_ += 5) {
+                    if (ENEMY.rest[v_ * 5] > -1.2f) continue;
+                    const float *q_ = &ENEMY.skinned[v_ * 5]; float wx_ = EN.p.x + cs_ * q_[0] - sn_ * q_[1], wy_ = EN.p.y + sn_ * q_[0] + cs_ * q_[1], wz_ = EN.p.z + q_[2];
+                    if (fabsf(wx_ - pl->x) < rr_ && fabsf(wy_ - pl->y) < rr_ && wz_ > pl->z - 0.4f && wz_ < pl->z + 2.1f && (wx_ - pl->x) * (wx_ - pl->x) + (wy_ - pl->y) * (wy_ - pl->y) < rr_ * rr_) {
+                        EN.hits |= 0x200; dmg += (m->dmg > 0.0f ? m->dmg : 28.0f) * ((g_lb_broke & 16) ? 0.4f : 0.85f); maplog("moon presence: tail hit%s%s", "", ""); break; }
+                }
+            }
+        }
+        if (ghh && gh_map()) dmg += gh_move_fx(m, f, dt, pl, invuln, dist);      // gh_redo
+        if ((m->fl & BF_SHOOT) && !(m->fl & BF_BEAM) && !BS.shot_done && f >= m->shot_f) { BS.shot_done = 1; if (boss_shot(pl) && !invuln) { if (ghh && (m->fl & BF_AIM)) { if (g_pstag_cd <= 0.0f && !g_pl_stagged) g_pl_stag_req = 1; dmg += BOSS_SHOT_DMG * 0.9f; g_gh_shit = 1; } else if (g_pl_windup && g_pstag_cd <= 0.0f && !g_pl_stagged) { g_pl_stag_req = 1; dmg += BOSS_SHOT_DMG * 0.4f; } else dmg += BOSS_SHOT_DMG * 1.05f; } }
+        ENEMY.show_pistol = (m->fl & BF_SHOOT) && !(m->fl & BF_BEAM) && f > 0.1f && f < 0.92f;
+        wa = m->wa; wt = EN.st * boss_rate(m);      /* (EN.st already carries gh_delay's pace, so the blade stays with the body) */ if (gh_map() && (m->fl & BF_ARC)) wa = -1;
         if (EN.st >= EN.sdur && cb_map() && (m->fl & BF_BODY)) { snd_play_at(S_CB_IMPACT, EN.p.x, EN.p.y, 1.5f); for (int q_ = 0; q_ < 3 && g_nbrk; q_++) if (!brk_boss(EN.p.x, EN.p.y, EN.p.z + 0.9f, 3.2f, EN.p.x, EN.p.y)) break; }      // cb_brk: the slam lands on whatever stands there
         if (EN.st >= EN.sdur && gb_map() && (m->fl & BF_GRAB)) {      // gilbert_mech: a grab that lands leaves you reeling; one that misses leaves him open
             if (EN.hits) { if (g_pstag_cd <= 0.0f && !g_pl_stagged) g_pl_stag_req = 1; }
             else if (g_gb_gfail >= 0) { BS.pvisc = 0; BS.nostag = 0; BS.sub = SUB_STAG; EN.state = E_HURT; EN.stagger = 1; EN.st = 0.0f; EN.sdur = fminf(en_len(g_gb_gfail), 1.8f); EN.vx = EN.vy = 0.0f; EN.hits = 0; en_play(g_gb_gfail, 0.1f, 1); break; }
         }
         if (EN.st >= EN.sdur) { BS.pvisc = 0; BS.nostag = 0; BS.sub = SUB_CHASE; EN.state = E_CHASE; EN.cool = BS.phase >= 2 ? 0.05f + frand() * 0.3f : 0.12f + frand() * 0.4f; ENEMY.show_pistol = 0;
-            g_cb_rate_x = 1.0f; if (g_cb_intro == 1) { int rk_ = -1, ra_ = cpick(&CBC, "Scream1"); for (int i = 0; i < P->n; i++) if (P->m[i].a == ra_ && ra_ >= 0) rk_ = i; if (rk_ >= 0) { g_cb_intro = 2; g_cb_rate_x = 0.72f; boss_start_move(rk_, dist); snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); cb_roar_shake(1.0f); EN.vx = EN.vy = 0.0f; } else { g_cb_intro = 0; snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); cb_roar_shake(1.0f); EN.cool = 0.8f; } }      // cb_intro: he has landed - the roar
+            g_cb_rate_x = 1.0f; if (g_cb_intro == 1) { int rk_ = -1, ra_ = cpick(cb_char(), "Scream1"); for (int i = 0; i < P->n; i++) if (P->m[i].a == ra_ && ra_ >= 0) rk_ = i; if (rk_ >= 0) { g_cb_intro = 2; g_cb_rate_x = 0.72f; boss_start_move(rk_, dist); snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); cb_roar_shake(1.0f); EN.vx = EN.vy = 0.0f; } else { g_cb_intro = 0; snd_play_at(S_CB_ROAR, EN.p.x, EN.p.y, 1.8f); cb_roar_shake(1.0f); EN.cool = 0.8f; } }      // cb_intro: he has landed - the roar
             else if (g_cb_intro == 2) { g_cb_intro = 0; EN.cool = 0.7f; }
+            else if (cbh && moon_map()) { if (g_cb_chain > 0) { g_cb_chain--; EN.cool = 0.0f; } else if (frand() < (g_moon_form ? 0.8f : 0.65f)) { g_cb_chain = frand() < 0.5f ? 2 : 1; EN.cool = 0.0f; } else EN.cool = 0.02f + frand() * 0.1f; }      /* moon_moves: hardly any recovery, and a run of up to three blows */
             else if (cbh) { if (g_cb_chain > 0) { g_cb_chain--; EN.cool = 0.0f; } else if (cbp2 && !(m->fl & BF_GAP) && frand() < 0.6f) { g_cb_chain = frand() < 0.4f ? 1 : 0; EN.cool = 0.0f; } else if (cbp2) EN.cool *= 0.4f; }
-            else if (ghh) {      /* gh_hard: a close, plain move can run straight into the next one; in the torch phase it also leaves burning ground */
-                if (g_gh_chain > 0) { g_gh_chain--; EN.cool = 0.0f; }
-                else if (!(m->fl & (BF_GAP | BF_SHOOT | BF_RETREAT)) && dist < 4.5f && fabsf(ad) < 1.3f && !g_pl_stagged && frand() < (ghp2 ? 0.65f : 0.4f)) { g_gh_chain = frand() < (ghp2 ? 0.5f : 0.3f) ? 1 : 0; EN.cool = 0.0f; }
-                else if (ghp2) EN.cool *= 0.5f;
-                if (ghp2 && !(m->fl & (BF_SHOOT | BF_RETREAT)) && frand() < 0.45f) { int sl_ = 0; for (int q_ = 0; q_ < 4; q_++) { if (g_ghf[q_].t <= 0.0f) { sl_ = q_; break; } if (g_ghf[q_].t < g_ghf[sl_].t) sl_ = q_; } g_ghf[sl_].x = EN.p.x + cosf(EN.face) * 2.3f; g_ghf[sl_].y = EN.p.y + sinf(EN.face) * 2.3f; g_ghf[sl_].z = EN.p.z; g_ghf[sl_].t = 6.0f; g_ghf[sl_].tick = 0.0f; }
+            else if (gbf) {      /* gb_ai: he does not wait: plain close moves can run into another one (more in phase 2), and phase 2 swings leave fire where they land */
+                if (g_gb_chain > 0) { g_gb_chain--; EN.cool = 0.0f; }
+                else if (!(m->fl & (BF_GAP | BF_SHOOT | BF_RETREAT | BF_GRAB)) && dist < 4.5f && fabsf(ad) < 1.3f && !g_pl_stagged && frand() < (gbp2 ? 0.6f : 0.4f)) { g_gb_chain = frand() < 0.4f ? 1 : 0; EN.cool = 0.0f; }
+                else EN.cool *= gbp2 ? 0.4f : 0.7f;
+                if (gbp2 && !(m->fl & (BF_SHOOT | BF_RETREAT | BF_GAP)) && frand() < 0.4f) { int sl_ = 0; for (int q_ = 0; q_ < 4; q_++) { if (g_ghf[q_].t <= 0.0f) { sl_ = q_; break; } if (g_ghf[q_].t < g_ghf[sl_].t) sl_ = q_; } g_ghf[sl_].x = EN.p.x + cosf(EN.face) * 2.2f; g_ghf[sl_].y = EN.p.y + sinf(EN.face) * 2.2f; g_ghf[sl_].z = EN.p.z; g_ghf[sl_].t = 5.0f; g_ghf[sl_].tick = 0.4f; }
+            }
+            else if (ghh) {      /* gh_redo: a stagger shot that landed is followed by a gap-closer; close, plain moves run on into the next (long flurries in sword mode) */
+                int kg_ = -1;
+                if (g_gh_shit && (m->fl & BF_SHOOT) && dist < 13.0f) { for (int i = 0; i < P->n; i++) if ((P->m[i].fl & BF_GAP) && !(P->m[i].fl & BF_BODY)) { kg_ = i; if (frand() < 0.5f) break; } }
+                g_gh_shit = 0;
+                if (kg_ >= 0) { EN.cool = 0.0f; boss_start_move(kg_, dist); maplog("gehrman: stagger shot, then the gap-closer%s%s", "", ""); }
+                else if (g_gh_chain > 0) { g_gh_chain--; EN.cool = 0.0f; }
+                else if (!(m->fl & (BF_GAP | BF_SHOOT | BF_RETREAT | BF_ARC | BF_QUICK)) && dist < 4.5f && fabsf(ad) < 1.3f && !g_pl_stagged && frand() < (ghp2 ? 0.88f : (BS.phase == 0 ? 0.8f : 0.68f))) { g_gh_chain = BS.phase == 0 ? (frand() < 0.7f ? (frand() < 0.5f ? 3 : 2) : 1) : (frand() < (ghp2 ? 0.75f : 0.55f) ? (frand() < 0.45f ? 3 : 2) : 1); EN.cool = 0.0f; }      /* gh_video: longer runs of blows, as in the guide video */
+                else EN.cool *= ghp2 ? 0.2f : 0.4f;
             } }
         break; }
     case SUB_TRANS:
-        EN.st += dt; turn_to(&EN.face, want, 1.5f * dt);
+        EN.st += dt; turn_to(&EN.face, want, ((rl_map() && g_rom_have) ? 0.7f : 1.5f) * dt);
         if (gb_map() && BS.phase == 4 && (EN.a_cur == g_gb_bfa[0] || EN.a_cur == g_gb_bfa[1])) { float f_ = EN.st / (EN.sdur > 0.1f ? EN.sdur : 1.0f); if (f_ > 0.35f && f_ < 0.7f && !(EN.hits & 1) && dist < 3.6f && fabsf(pl->z - EN.p.z) < 3.5f) { EN.hits |= 1; if (!invuln) dmg += 40.0f; } }      // gilbert_mech: the break-free blow
         if (BS.phase == 0) { wa = P->w_unfold; wt = EN.st; }
         if (EN.st >= EN.sdur) boss_trans_next();
@@ -12076,12 +13355,34 @@ static float boss_update(float dt, const Player *pl, int invuln) {
     }
     if (g_cb_hide && cb_map() && BS.sub == SUB_WAIT) { EN.p.x = EN.hx; EN.p.y = EN.hy; EN.p.z = g_cb_z0; EN.p.vz = 0.0f; EN.p.grounded = 1; }      // cb_intro: waiting behind the wall
     else if (g_cb_intro == 1 && BS.sub == SUB_ATTACK) { EN.p.x += mx * dt; EN.p.y += my * dt; { const BMove *mm_ = &P->m[BS.mv]; float fh_ = cb_land_f(mm_), air_ = EN.sdur * fh_, u_ = air_ > 0.05f ? EN.st / air_ : 1.0f; if (u_ >= 1.0f) { u_ = 1.0f; if (!g_cb_landed) { g_cb_landed = 1; snd_play_at(S_CB_IMPACT, EN.p.x, EN.p.y, 1.6f); g_shake = 0.6f; ground_impact(EN.p.x, EN.p.y, g_cb_z0, 1.6f); for (int q_ = 0; q_ < 3 && g_nbrk; q_++) if (!brk_boss(EN.p.x, EN.p.y, EN.p.z + 0.9f, 3.2f, EN.p.x, EN.p.y)) break; } } EN.p.z = g_cb_z0 + 10.0f * 4.0f * u_ * (1.0f - u_); } EN.p.vz = 0.0f; EN.p.grounded = 0; }      // cb_intro: the leap clears the wall (no collision on the way)
-    else pl_update(&world, &EN.p, mx * dt, my * dt, dt);
+    else { pl_update(&world, &EN.p, mx * dt, my * dt, dt); amyg_wall_push(); if (g_gb_leap && BS.sub == SUB_ATTACK) gb_leap_step(); }
     if (gh_map()) { float cx_ = EN.p.x - GH_X, cy_ = EN.p.y - GH_Y, r_ = hypotf(cx_, cy_); if (r_ > 14.0f) { EN.p.x = GH_X + cx_ * 14.0f / r_; EN.p.y = GH_Y + cy_ * 14.0f / r_; } }      // gehrman_boss: he stays in the garden
     if (gb_map() && BS.phase == 4 && BS.sub != SUB_DEAD) { EN.p.x = EN.hx; EN.p.y = EN.hy; EN.p.z = GB_Z_SIT; EN.p.vz = 0.0f; EN.p.grounded = 1; }      // gilbert_boss: he is bound to the table
     if (g_cut_t >= 0.0f && g_cut_gas) { EN.p.x = GI_X + g_gio[0]; EN.p.y = GI_Y + g_gio[1]; EN.p.z = g_gi_z + g_gio[2]; EN.p.vz = 0.0f; }      // gas_intro: back to the fixed spot and height after the floor snap (the werewolf mesh there made him jump between heights)
     if (gb_map() && BS.sub == SUB_ATTACK && BS.mv >= 0 && BS.mv < P->n && P->m[BS.mv].dmg <= 0.0f) { float fr_ = EN.st / (EN.sdur > 0.01f ? EN.sdur : 1.0f); if (fr_ > 0.1f && fr_ < 0.85f) cb_roar_shake(0.55f * (0.75f + 0.25f * sinf(EN.st * 38.0f))); }      /* gilbert's roars shake the screen too */
-    if (cb_map() && BS.sub == SUB_ATTACK && BS.mv >= 0 && BS.mv < P->n && P->m[BS.mv].a >= 0 && P->m[BS.mv].a == cpick(&CBC, "Scream1")) { float fr_ = EN.st / (EN.sdur > 0.01f ? EN.sdur : 1.0f); if (fr_ > 0.1f && fr_ < 0.85f) cb_roar_shake(0.6f * (0.75f + 0.25f * sinf(EN.st * 38.0f))); }      /* the roar itself: the whole scream shakes the screen */
+    if (cb_map() && BS.sub == SUB_ATTACK && BS.mv >= 0 && BS.mv < P->n && P->m[BS.mv].a >= 0 && P->m[BS.mv].a == cpick(cb_char(), "Scream1")) { float fr_ = EN.st / (EN.sdur > 0.01f ? EN.sdur : 1.0f); if (fr_ > 0.1f && fr_ < 0.85f) cb_roar_shake(0.6f * (0.75f + 0.25f * sinf(EN.st * 38.0f))); }      /* the roar itself: the whole scream shakes the screen */
+    if (rom_map() && !moon_map() && !rl_map() && g_amyg_on && EN.state != E_DEAD) {      /* amyg_blood: he gets covered in his own blood as the fight goes on; the arms come off in a spray from his back */
+        static float acc_ = 0.0f; static int tear_ = 0;
+        if (AMG_BLOOD && BS.fight && !g_amg_arms) { acc_ += dt; if (acc_ > 2.4f) { acc_ = 0.0f; g_ast_want += 1 + (frand() < 0.4f ? 1 : 0); } }
+        int tearing_ = BS.phase == 3 && BS.sub == SUB_TRANS && !g_amg_arms && EN.hp <= EN.hp_max * 0.31f;
+        float h_ = EN.zhi - EN.zlo; if (h_ < 1.0f) h_ = 3.0f; float ff_ = EN.face + EN.yaw_off, fx_ = cosf(ff_), fy_ = sinf(ff_);
+        int beam_ = g_amg_arms && BS.sub == SUB_ATTACK && BS.mv >= 0 && BS.mv < P->n && P->m[BS.mv].a >= 0 && P->m[BS.mv].a == cpick(cb_char(), "ArcaneBeam");      /* rearing up to scream for the laser: another spray from his back */
+        float bf_ = EN.sdur > 0.01f ? EN.st / EN.sdur : 0.0f; static int bsp_ = 0; int bspray_ = beam_ && bf_ > 0.08f && bf_ < 0.5f; if (!beam_) bsp_ = 0;
+        if (tearing_ || bspray_) {
+            if (tearing_ && !tear_) { tear_ = 1; if (AMG_BLOOD) { g_ast_want += 24; snd_play_at(S_VISC, EN.p.x, EN.p.y, 1.0f); } g_shake = 1.0f; g_vshake = 1; }
+            if (bspray_ && !bsp_) { bsp_ = 1; if (AMG_BLOOD) snd_play_at(S_VISC, EN.p.x, EN.p.y, 0.8f); }
+            if (AMG_BLOOD) for (int sd_ = -1; sd_ <= 1; sd_ += 2) {
+                float px_ = EN.p.x - fx_ * 0.12f * h_ - fy_ * sd_ * 0.2f * h_, py_ = EN.p.y - fy_ * 0.12f * h_ + fx_ * sd_ * 0.2f * h_, pz_ = EN.p.z + EN.zlo + h_ * 0.7f;
+                blood_explode(px_, py_, pz_, px_ + fx_ * 3.0f, py_ + fy_ * 3.0f, 3, 5.2f, 0.75f);
+                if (frand() < 0.12f) { float r_ = 1.0f + frand() * 2.5f; blood_splat(px_ - fx_ * r_, py_ - fy_ * r_, EN.p.z, 0.5f + frand() * 0.6f); }
+            }
+        } else if (AMG_BLOOD && g_amg_arms && frand() < 0.4f) {      /* stump_drip: blood runs off the stumps and falls to the floor for the rest of the fight */
+            float sd_ = frand() < 0.5f ? -1.0f : 1.0f, px_ = EN.p.x - fx_ * 0.12f * h_ - fy_ * sd_ * 0.2f * h_, py_ = EN.p.y - fy_ * 0.12f * h_ + fx_ * sd_ * 0.2f * h_, pz_ = EN.p.z + EN.zlo + h_ * 0.62f;
+            for (int j = 0; j < BL_MAX; j++) if (g_bl[j].life <= 0.0f) { BDrop *b = &g_bl[j]; b->x = px_ + (frand() - 0.5f) * 0.15f; b->y = py_ + (frand() - 0.5f) * 0.15f; b->z = pz_; b->vx = -fx_ * 0.15f; b->vy = -fy_ * 0.15f; b->vz = 0.0f; b->life = 1.6f; b->size = 0.05f + frand() * 0.05f; break; }
+            if (frand() < 0.12f) blood_splat(px_ - fx_ * 0.3f, py_ - fy_ * 0.3f, EN.p.z, 0.25f + frand() * 0.3f);
+        }
+        if (!tearing_) tear_ = 0;
+    }
     if (BS.sub == SUB_ATTACK && BS.mv >= 0 && BS.mv < P->n && !g_cb_intro && dist < 40.0f) {      /* boss_fx: swipe trail while the blow is travelling, an impact when a heavy one hits the ground */
         const BMove *mm_ = &P->m[BS.mv]; float f_ = EN.st / (EN.sdur > 0.01f ? EN.sdur : 1.0f), tp_[3] = { 0, 0, 0 }; int in_ = 0, htp_ = 0;
         for (int w_ = 0; w_ < mm_->nwin; w_++) if (f_ >= mm_->win[w_][0] - 0.04f && f_ <= mm_->win[w_][1]) in_ = 1;
@@ -12102,16 +13403,16 @@ static float boss_update(float dt, const Player *pl, int invuln) {
             if (hv_) { float ix_ = tp_[0], iy_ = tp_[1], gz_ = EN.p.z; if (tp_[2] > EN.p.z + 1.6f || (mm_->fl & BF_BODY)) { ix_ = EN.p.x + cosf(EN.face) * ((mm_->fl & BF_BODY) ? 0.8f : 2.4f); iy_ = EN.p.y + sinf(EN.face) * ((mm_->fl & BF_BODY) ? 0.8f : 2.4f); } if (gb_map() && BS.phase == 4) { float fz_; if (cw_floor(&world, ix_, iy_, EN.p.z + 0.5f, &fz_)) gz_ = fz_; else gz_ = EN.p.z - 0.9f; } ground_impact(ix_, iy_, gz_, (mm_->fl & BF_BODY) ? 1.5f : (BS.phase == 4 ? 0.8f : 1.0f)); }
         }
     } else g_bt_have = 0;
-    { float r = (BS.sub == SUB_CHASE && (mx != 0.0f || my != 0.0f)) ? EN.loco_rate : (BS.sub == SUB_ATTACK ? boss_rate(&P->m[BS.mv]) : 1.0f); EN.t_cur += dt * r; EN.t_prev += dt; }
+    { float r = (BS.sub == SUB_CHASE && (mx != 0.0f || my != 0.0f)) ? EN.loco_rate : (BS.sub == SUB_ATTACK ? boss_rate(&P->m[BS.mv]) * g_gh_warp : 1.0f); EN.t_cur += dt * r; EN.t_prev += dt; }
     if (g_cb_intro == 1 && BS.sub == SUB_ATTACK && BS.mv >= 0 && BS.mv < P->n) { float ln_ = en_len(P->m[BS.mv].a); if (EN.a_cur == P->m[BS.mv].a && EN.t_cur > ln_ - 0.04f) EN.t_cur = ln_ - 0.04f; }      // cb_intro: after the animation he holds its last pose while he glides down
-    if (BS.sub == SUB_DEAD) { const BPhase *Q = &BPH[BS.phase]; if (Q->death >= 0 && EN.a_cur == Q->death) { float len = en_len(Q->death) * (gh_map() ? gh_dfrac() : 1.0f); if (EN.t_cur > len - 0.04f) EN.t_cur = len > 0.08f ? len - 0.04f : 0.0f; } }
+    if (BS.sub == SUB_DEAD) { const BPhase *Q = &BPH[BS.phase]; if (Q->death >= 0 && EN.a_cur == Q->death) { float len = (gh_map() || g_gh_dying) ? gh_dlen(Q->death) : en_len(Q->death); if (EN.t_cur > len - 0.04f) EN.t_cur = len > 0.08f ? len - 0.04f : 0.0f; } }
     if (EN.blend > 0.0f) { EN.blend -= dt / EN.blend_len; if (EN.blend < 0.0f) EN.blend = 0.0f; }
     if (gb_map()) { static int la_ = -2, ls_ = -1, cnt_ = 0; if ((EN.a_cur != la_ || BS.sub != ls_) && cnt_ < 500) { cnt_++; la_ = EN.a_cur; ls_ = BS.sub; char t_[160]; snprintf(t_, sizeof t_, "gilbert: phase %d sub %d anim %d %s hp %.0f dist %.1f", BS.phase, (int)BS.sub, la_, (la_ >= 0 && la_ < (int)ENEMY.nA) ? ENEMY.anim[la_].name : "?", EN.hp, dist); maplog("%s%s", t_, ""); } }      // gb_trace: every animation change in the fight, for maplog.txt
     if (dist < FOG_END + 8.0f || (g_cut_t >= 0.0f && g_cut_gas)) {
         CUR = &ENEMY;
         const BPhase *Q = &BPH[BS.phase];
         if (ENEMY.hand >= 0 && ENEMY.nWA) {                          // the axe: its own animation for the move, otherwise folded (phase 0) / open (phase 1)
-            if (g_gh_spear && gh_map()) {      // gh_spear: closed spear -> half way open (phase 1) over the unfolding
+            if (g_gh_spear && (gh_map() || g_gh_dying)) {      // gh_spear: closed spear -> half way open (phase 1) over the unfolding
                 int o_ = cwpick(&GEHC, "open"); float L_ = weapon_len(o_), hf_ = L_ * g_gh_half;
                 (void)L_; (void)hf_;
                 if (BS.phase == 0 && BS.sub == SUB_TRANS) { float k_ = EN.sdur > 0.1f ? EN.st / EN.sdur : 1.0f; gh_blade_pose(o_, (k_ > 1.0f ? 1.0f : k_) * g_gh_half); }
@@ -12121,10 +13422,16 @@ static float boss_update(float dt, const Player *pl, int invuln) {
             else if (wa >= 0) weapon_sample(wa, wt);
             else if (BS.phase == 0) weapon_sample(Q->w_closed, 0.0f);
             else weapon_sample(Q->w_open, 0.0f);
-            if (BS.phase == 0) axe_boff_apply();      // axe_boff: folded
+            if (BS.phase < 2) axe_boff_apply(BS.phase == 1);      // axe_boff: folded (phase 0) / unfolded (phase 1): axe_boff.txt = 3 numbers folded, then 3 for unfolded
         } else ENEMY.wset = 0;
         hunter_pose(EN.a_cur, EN.t_cur, EN.a_prev, EN.t_prev, EN.blend);
-        g_wadj_on = g_gh_spear && gh_map(); hunter_skin(); g_wadj_on = 0;
+        if (g_gh_spear && (gh_map() || g_gh_dying)) {      // scythe: the hand slides up the haft toward the blade while it is a sword; the blade leads the swing while it is a scythe
+            float of_ = BS.phase >= 1 ? 1.0f : (BS.sub == SUB_TRANS ? (EN.sdur > 0.1f ? fminf(1.0f, EN.st / EN.sdur) : 1.0f) : 0.0f);
+            g_wgrip = g_gh_grip * (1.0f - of_);
+            float tg_ = (BS.phase >= 1 && BS.sub == SUB_ATTACK && EN.state != E_DEAD) ? 1.0f : 0.0f; g_wfwd += (tg_ - g_wfwd) * fminf(1.0f, dt * 9.0f);
+            { float sw_ = (BS.phase == 0 && BS.sub != SUB_ATTACK && BS.sub != SUB_TRANS && BS.sub != SUB_STAG && BS.sub != SUB_DEAD) ? 1.0f : 0.0f; g_wsw += (sw_ - g_wsw) * fminf(1.0f, dt * 8.0f); }
+        } else { g_wgrip = 0.0f; g_wfwd = 0.0f; g_wsw = 0.0f; }
+        g_wadj_on = g_gh_spear && (gh_map() || g_gh_dying); hunter_skin(); g_wadj_on = 0;
         CUR = &HUNT;
     }
     GIF("boss_done");
@@ -12762,6 +14069,9 @@ static void gh_gate_wall(Player *pl) {      // you can walk in through the fog, 
 // ---- lock-on target selection
 static float wrap_pi(float a) { while (a > 3.14159265f) a -= 6.28318531f; while (a < -3.14159265f) a += 6.28318531f; return a; }
 // where a lock-on aims: pt 0 = the body; on the Cleric Beast 1 = head, 2 = left leg, 3 = right leg
+#define AMYG_LP_X (0.5f)      /* the rear lock-on spot in the model's rest pose: just above his hips (the hind legs hang from z ~1.7 at the back) */
+#define AMYG_LP_Z 2.0f
+static int g_amyg_on;      // the Amygdala test model is loaded in place of the Cleric Beast: its lock-on follows the body through the jump
 static int en_lp_count(int i) { return (ENS[i].type == 4 && cb_map() && ENS[i].state != E_DEAD) ? 2 : 1; }
 static int en_bone_world(const Enemy *e, int k, float *x, float *y, float *z) {       // where the lock-on bone k (0 head, 1/2 feet) is in the world; 0 if it has none
     if (g_cb_lpb[k] < 0 || !e->ch.pose) return 0;
@@ -12773,13 +14083,50 @@ static int en_bone_world(const Enemy *e, int k, float *x, float *y, float *z) { 
 static void en_lockpoint(int i, int pt, float *x, float *y, float *z) {
     const Enemy *e = &ENS[i];
     *x = e->p.x; *y = e->p.y; *z = e->p.z + e->cz;
+    if (g_amyg_on && e->type == 4 && e->ch.pose && e->ch.nAt >= 4 && pt <= 1) {      // Amygdala: point 1 = the middle of his body (the posed spine_2 attachment, it rises and travels with him), point 0 = low at the back, between the hind legs and the tail
+        float lx, ly, lz;
+        if (pt == 1) { const float *m = e->ch.pose + (size_t)(e->ch.nB + 3) * 12; lx = m[3]; ly = m[7]; lz = m[11]; }
+        else { const float *m = e->ch.pose, rx = AMYG_LP_X, ry = 0.0f, rz = AMYG_LP_Z; lx = m[0] * rx + m[1] * ry + m[2] * rz + m[3]; ly = m[4] * rx + m[5] * ry + m[6] * rz + m[7]; lz = m[8] * rx + m[9] * ry + m[10] * rz + m[11]; }
+        float cs_ = cosf(e->face + e->yaw_off), sn_ = sinf(e->face + e->yaw_off);
+        float wx_ = e->p.x + cs_ * lx - sn_ * ly, wy_ = e->p.y + sn_ * lx + cs_ * ly, wz_ = e->p.z + lz;
+        if (hypotf(wx_ - e->p.x, wy_ - e->p.y) < 6.0f && wz_ > e->p.z - 0.2f && wz_ < e->p.z + 8.0f) { *x = wx_; *y = wy_; *z = wz_; return; }
+    }
     if (e->type == 5 && pt <= 0) { float wa_ = e->face + e->yaw_off; *x += cosf(wa_) * 0.8f; *y += sinf(wa_) * 0.8f; *z += 0.1f; }      // werewolf: the lock-on sat on its rump (its origin); it hangs in the middle of the body now
     if (pt <= 0 || pt >= en_lp_count(i)) return;
     float cs = cosf(e->face), sn = sinf(e->face), bx, by, bz, cx, cy, cz;
     if (pt == 1) {                                                        // the head: its bone if that gives a sensible spot, otherwise high up in front of him
-        if (en_bone_world(e, 0, &bx, &by, &bz) && bz > e->p.z + 1.8f && bz < e->p.z + 4.2f) { *x = bx; *y = by; *z = bz; return; }
+        if (en_bone_world(e, 0, &bx, &by, &bz) && bz > e->p.z + 1.8f && bz < e->p.z + (g_amyg_on ? 8.0f : 4.2f)) { *x = bx; *y = by; *z = bz; return; }
         *x = e->p.x + cs * 0.9f; *y = e->p.y + sn * 0.9f; *z = e->p.z + 2.9f; return;
     }
+}
+/* ---- moon_shape: the Moon Presence is solid where his body really is, not a big round pillar. You are pushed out of the parts of him that are at your height (his legs, tails, a low-hanging arm) and can walk under whatever is above your head; your blade hits wherever it touches him, the tails and legs included */
+static int moon_shape_on(void) { return EN.type == 4 && ((moon_map() && g_moon_have) || (rl_map() && g_rom_have)) && EN.state != E_DEAD && ENEMY.skinned && ENEMY.nV > 0; }
+static int moon_blade_hit(const float *A, const float *B) {
+    if (!moon_shape_on()) return 0;
+    float cs = cosf(EN.face), sn = sinf(EN.face), a[3], d[3];
+    { float ax = A[0] - EN.p.x, ay = A[1] - EN.p.y, bx = B[0] - EN.p.x, by = B[1] - EN.p.y; a[0] = ax * cs + ay * sn; a[1] = -ax * sn + ay * cs; a[2] = A[2] - EN.p.z; d[0] = bx * cs + by * sn - a[0]; d[1] = -bx * sn + by * cs - a[1]; d[2] = B[2] - EN.p.z - a[2]; }
+    float l2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2]; if (l2 < 1e-6f) return 0;
+    float mx = a[0] + d[0] * 0.5f, my = a[1] + d[1] * 0.5f, mz = a[2] + d[2] * 0.5f, rr = sqrtf(l2) * 0.5f + 0.4f;
+    for (uint32_t v = 0; v < ENEMY.nV; v += 3) {
+        const float *q = &ENEMY.skinned[v * 5]; float wx = q[0] - a[0], wy = q[1] - a[1], wz = q[2] - a[2];
+        if (fabsf(q[0] - mx) > rr || fabsf(q[1] - my) > rr || fabsf(q[2] - mz) > rr) continue;
+        float t = (wx * d[0] + wy * d[1] + wz * d[2]) / l2; if (t < 0.0f) t = 0.0f; if (t > 1.0f) t = 1.0f;
+        float ex = wx - d[0] * t, ey = wy - d[1] * t, ez = wz - d[2] * t;
+        if (ex * ex + ey * ey + ez * ez < 0.38f * 0.38f) return 1;
+    }
+    return 0;
+}
+static void moon_push(float *px, float *py, float pz) {
+    float cs = cosf(EN.face), sn = sinf(EN.face), wx = *px - EN.p.x, wy = *py - EN.p.y, lx = wx * cs + wy * sn, ly = -wx * sn + wy * cs, lz = pz - EN.p.z, r = 0.5f, best = r * r, bx = 0.0f, by = 0.0f; int hit = 0;
+    for (uint32_t v = 0; v < ENEMY.nV; v += 2) {
+        const float *q = &ENEMY.skinned[v * 5]; float dz = q[2] - lz; if (dz < 0.2f || dz > 1.7f) continue;      /* only what is between your shins and your head */
+        float dx = lx - q[0], dy = ly - q[1]; if (fabsf(dx) > r || fabsf(dy) > r) continue;
+        float d2 = dx * dx + dy * dy; if (d2 < best) { best = d2; bx = dx; by = dy; hit = 1; }
+    }
+    if (!hit) return;
+    float d = sqrtf(best); if (d < 1e-3f) { bx = lx; by = ly; d = sqrtf(bx * bx + by * by); if (d < 1e-3f) { bx = 1.0f; by = 0.0f; d = 1.0f; } }
+    float push = r - d; if (push > 0.1f) push = 0.1f;      /* (a step at a time: no sudden throw when a leg swings into you) */
+    lx = bx / d * push; ly = by / d * push; *px += lx * cs - ly * sn; *py += lx * sn + ly * cs;
 }
 // does the player's blade (A to B) touch one of the Cleric Beast's lock-on points (head, legs)? Then it counts as a hit even if the body cylinder missed.
 static int blade_hits_lockpts(const float *A, const float *B, int i) {
@@ -12979,6 +14326,7 @@ static void thr_burn(float x, float y, float z, float r, float dmg, int direct, 
     for (int i = 0; i < NUM_ENEMIES; i++) {
         Enemy *e = &ENS[i]; if (e->state == E_DEAD || EN_NPC(e->type)) continue;
         float ex = e->p.x - x, ey = e->p.y - y; if (ex * ex + ey * ey > r * r || fabsf(e->p.z - z) > 2.5f) continue;
+        if (e->type == 13 && g_spd_have && rl_map() && !dot) { fire_hurt(e, e->hp_max * 40.0f, 0); continue; }      /* a Molotov kills a child of Rom outright, whichever way it faces */
         fire_hurt(e, i == direct ? dmg * 1.6f : dmg, dot);      /* molotov: one hit, no burning afterwards */
     }
     CUR = &HUNT; ECUR = &ENS[0];
@@ -12990,6 +14338,16 @@ static void thr_impact(int kind, float x, float y, float z, int he) {
         snd_play_at(S_HIT, x, y, 0.5f); maplog("throwing knife landed%s%s", "", ""); return;
     }
     if (kind == 4) { for (int k = 0; k < 3; k++) spark_spawn(x, y, z, 0.05f); return; }      // a tracer ends in a few sparks
+    if (kind == 6) {      /* moonlight_sword: the wave bursts on what it meets (most of a two-handed swing's damage, arcane, and it knocks small creatures back) */
+        for (int k = 0; k < 14; k++) spark_spawn(x + (frand() - 0.5f) * 0.8f, y + (frand() - 0.5f) * 0.8f, z + (frand() - 0.5f) * 0.6f, 0.14f); glow_add_c(x, y, z, 2.2f, 1);
+        if (he >= 0 && ENS[he].state != E_DEAD && !EN_NPC(ENS[he].type)) {
+            ECUR = &ENS[he]; g_blood_gun = 1; enemy_hurt((g_ml_dmg > 1.0f ? g_ml_dmg : 25.0f) * g_amul); g_blood_gun = 0;
+            if (EN.state != E_DEAD && (EN.type == 1 || EN.type == 2 || EN.type == 6 || (EN.type >= 12 && EN.type <= 14))) enemy_stagger();
+            if (EN.state == E_IDLE) EN.state = E_CHASE;
+            CUR = &HUNT; ECUR = &ENS[0];
+        }
+        snd_play_at_p(S_HIT, x, y, 0.7f, 1.35f); snd_play_at_p(S_W_TONI_ACT, x, y, 0.5f, 1.8f); return;
+    }
     if (kind == 3) {      // blacksky eye: arcane damage with no fall-off, staggers small beasts and dogs, makes no noise (only the creature it hits notices)
         for (int k = 0; k < 8; k++) spark_spawn(x, y, z, 0.12f); glow_add_c(x, y, z, 1.4f, 1);
         if (he >= 0 && ENS[he].state != E_DEAD && !EN_NPC(ENS[he].type)) {
@@ -13025,7 +14383,7 @@ static void thr_launch(int kind, const Player *pl, float face, int lk) {
         float ex = ENS[lk].p.x - t->x, ey = ENS[lk].p.y - t->y, d = sqrtf(ex * ex + ey * ey);
         if (d > 0.5f) { float T = d / 12.0f; if (T < 0.25f) T = 0.25f; if (T > 0.9f) T = 0.9f; hvx = ex / T; hvy = ey / T; vz = (ENS[lk].p.z + ENS[lk].cz - t->z + 0.5f * 9.8f * T * T) / T; }
     }
-    if (kind == 3 || kind == 4 || kind == 5) { float sp_ = kind == 4 ? 90.0f : (kind == 5 ? 30.0f : 40.0f); hvx = cf * sp_; hvy = sf * sp_; vz = 0.0f; t->z = pl->z + 1.3f;      // 3: blacksky bolt; 4: a gun's tracer (looks only)      // blacksky_eye: a straight, fast bolt
+    if (kind == 3 || kind == 4 || kind == 5 || kind == 6) { float sp_ = kind == 4 ? 90.0f : (kind == 5 ? 30.0f : (kind == 6 ? 24.0f : 40.0f)); hvx = cf * sp_; hvy = sf * sp_; vz = 0.0f; t->z = pl->z + (kind == 6 ? 1.1f : 1.3f);      // 3: blacksky bolt; 4: a gun's tracer (looks only)      // blacksky_eye: a straight, fast bolt
         if (lk >= 0 && lk < NUM_ENEMIES && ENS[lk].state != E_DEAD) { float ex = ENS[lk].p.x - t->x, ey = ENS[lk].p.y - t->y, ez = ENS[lk].p.z + ENS[lk].cz - t->z, d = sqrtf(ex * ex + ey * ey); if (d > 0.5f) { hvx = ex / d * sp_; hvy = ey / d * sp_; vz = ez / d * sp_; } } }
     t->vx = hvx; t->vy = hvy; t->vz = vz;
 }
@@ -13048,13 +14406,16 @@ static void thr_update(float dt) {
     for (int i = 0; i < THR_MAX; i++) {
         Thr *t = &g_thr[i]; if (!t->on) continue;
         t->age += dt; if (t->age > 6.0f) { t->on = 0; continue; }
-        float gk_ = t->kind >= 3 ? 0.0f : 9.8f; if ((t->kind == 3 && t->age > 1.2f) || (t->kind == 4 && t->age > 0.16f) || (t->kind == 5 && t->age > 0.8f)) { t->on = 0; continue; }
+        float gk_ = t->kind >= 3 ? 0.0f : 9.8f; if ((t->kind == 3 && t->age > 1.2f) || (t->kind == 4 && t->age > 0.16f) || (t->kind == 5 && t->age > 0.8f) || (t->kind == 6 && t->age > 0.75f)) { t->on = 0; continue; }
         float nx = t->x + t->vx * dt, ny = t->y + t->vy * dt, nz = t->z + t->vz * dt - 0.5f * gk_ * dt * dt; t->vz -= gk_ * dt;
         float o[3] = { t->x, t->y, t->z }, d[3] = { nx - t->x, ny - t->y, nz - t->z }, len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]), hx = nx, hy = ny, hz = nz; int hit = 0, he = -1;
         if (len > 1e-4f) { d[0] /= len; d[1] /= len; d[2] /= len; float th; if (cw_raycast(&world, o, d, len, &th)) { float b = th > 0.03f ? th - 0.03f : 0.0f; hx = o[0] + d[0] * b; hy = o[1] + d[1] * b; hz = o[2] + d[2] * b; hit = 1; } }
         if (!hit) { float fz; if (t->vz < 0.0f && cw_floor(&world, nx, ny, nz + 0.6f, &fz) && nz <= fz + 0.05f) { hz = fz + 0.05f; hit = 1; } }
-        if (!hit) for (int k = 0; k < NUM_ENEMIES; k++) { const Enemy *e = &ENS[k]; if (e->state == E_DEAD || EN_NPC(e->type)) continue; float ex = e->p.x - nx, ey = e->p.y - ny; if (ex * ex + ey * ey < 0.3f && nz > e->p.z + 0.1f && nz < e->p.z + e->cz * 2.0f + 0.4f) { he = k; hit = 1; break; } }
-        if (t->kind == 4 || t->kind == 5) { glow_add(nx, ny, nz, 0.22f);      // tracers: gun shots and thrown knives leave a tiny glowing streak
+        if (!hit) for (int k = 0; k < NUM_ENEMIES; k++) { const Enemy *e = &ENS[k]; if (e->state == E_DEAD || EN_NPC(e->type)) continue; float ex = e->p.x - nx, ey = e->p.y - ny; float hr_ = t->kind == 6 ? 1.1f + e->hrad : 0.0f; if (ex * ex + ey * ey < (t->kind == 6 ? hr_ * hr_ : 0.3f) && nz > e->p.z + 0.1f - (t->kind == 6 ? 0.8f : 0.0f) && nz < e->p.z + e->cz * 2.0f + 0.4f) { he = k; hit = 1; break; } }
+        if (t->kind == 6 && !hit) { float sp_ = sqrtf(t->vx * t->vx + t->vy * t->vy), px_ = sp_ > 0.1f ? -t->vy / sp_ : 0.0f, py_ = sp_ > 0.1f ? t->vx / sp_ : 1.0f;      /* moonlight_sword: a crescent of pale light, 2.4 m wide, its ends trailing */
+            for (int q_ = -2; q_ <= 2; q_++) { float bk_ = 0.18f * q_ * q_; glow_add_c(nx + px_ * 0.6f * q_ - (sp_ > 0.1f ? t->vx / sp_ : 0.0f) * bk_, ny + py_ * 0.6f * q_ - (sp_ > 0.1f ? t->vy / sp_ : 0.0f) * bk_, nz, q_ == 0 ? 1.2f : 0.9f, 1); }
+            for (int q_ = 0; q_ < 2; q_++) spark_spawn(nx + px_ * (frand() - 0.5f) * 2.4f, ny + py_ * (frand() - 0.5f) * 2.4f, nz + (frand() - 0.5f) * 0.3f, 0.06f); }
+        else if (t->kind == 4 || t->kind == 5) { glow_add(nx, ny, nz, 0.22f);      // tracers: gun shots and thrown knives leave a tiny glowing streak
              if (frand() < 0.7f) ember_spawn(nx, ny, nz, 0.05f); } else if (t->kind == 3 && !hit) { glow_add_c(nx, ny, nz, 0.9f, 1); if (frand() < 0.5f) spark_spawn(nx, ny, nz, 0.04f); } else if (t->kind == 2 && !hit) { fire_spawn_short(nx, ny, nz, 0.22f); glow_add(nx, ny, nz, 1.1f); if (frand() < 5.0f * dt) ember_spawn(nx + (frand() - 0.5f) * 0.1f, ny + (frand() - 0.5f) * 0.1f, nz, 0.1f); } else if (t->kind == 1 && !hit && frand() < 0.5f) spark_spawn(nx, ny, nz, 0.04f);
         if (!hit) { t->x = nx; t->y = ny; t->z = nz; continue; }
         t->on = 0; thr_impact(t->kind, hx, hy, hz, he);
@@ -13078,7 +14439,7 @@ static void thr_draw(const PS1Shader *sh, const float *pv, float fx, float fy) {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
     glUniform2f(sh->uvOffset, 0.0f, 0.0f); glUniform1f(sh->affineAmt, 0.0f); glUniform1f(sh->alphaCut, 0.33f);
     for (int i = 0; i < THR_MAX; i++) {
-        const Thr *t = &g_thr[i]; if (!t->on || t->kind == 4) continue;
+        const Thr *t = &g_thr[i]; if (!t->on || t->kind == 4 || t->kind == 6) continue;
         const UiTex *ic = t->kind == 5 ? ic_by_text("ThrowingKnife", "ThrowingKnife") : t->kind == 3 ? ic_by_text("BlackskyEye", "BlackskyEye") : (t->kind == 2 ? ic_by_text("Molotov", "Molotov") : ic_by_text("Pebble", "Pebble"));
         GLuint tx = ic ? ic->id : g_pebTex; float sz = t->kind == 2 ? 0.34f : (ic ? 0.18f : 0.07f), lm[16], wv[16];
         lamp_matrix(lm, t->x, t->y, t->z, sz, sz, fx, fy); mat_mul(wv, pv, lm);
@@ -13138,6 +14499,7 @@ static void links_load(void) {
     }
     if (!txt) { txt = malloc(strlen(DEFAULT_LINKS) + 1); strcpy(txt, DEFAULT_LINKS); }
     links_parse(txt); free(txt);
+    { char x_[200]; snprintf(x_, sizeof x_, "ic_firstfloorsickroom:BP_LevelLoader2_2 = ic_sickroom2:BP_LevelLoader_Door2\n"); links_parse(x_); }      /* sick2_door: the locked door in the starting sickroom (BP_LevelLoader2_2, y -19.8) leads here too */
     map_note(start_map);
     {   // every converted level_<map>.bin joins the R1+SELECT cycle, linked or not
         SceUID d = sceIoDopen("ux0:data/bbpsx");
@@ -13389,7 +14751,7 @@ static void bld_idx(Bld *B, uint32_t i) {
 static int chunk_slow(const Chunk *c) { return c->tex >= 0 && ((texHasA && texHasA[c->tex]) || texAff[c->tex] > 0.0f); }      // opaque_fast: needs the full shader
 static int chunk_cmp(const void *a, const void *b) { int sa = chunk_slow((const Chunk *)a), sb = chunk_slow((const Chunk *)b); if (sa != sb) return sa - sb; if (((const Chunk *)a)->tex != ((const Chunk *)b)->tex) return ((const Chunk *)a)->tex - ((const Chunk *)b)->tex; return (int)((const Chunk *)a)->clamp - (int)((const Chunk *)b)->clamp; }
 static void bake_static(void) {
-    batched = 1; g_bake_oom = 0; heap_log("bake start");
+    g_roofz = -1.0e9f; g_roofg_ok = 0; for (int i_ = 0; i_ < 26; i_++) for (int j_ = 0; j_ < 20; j_++) g_roofg[i_][j_] = -1.0e9f; batched = 1; g_bake_oom = 0; heap_log("bake start");
     { g_nudge = 0.0f; { FILE *nf2_ = fopen("ux0:data/bbpsx/nudge.txt", "r"); if (nf2_) { float mm_ = 0.0f; if (fscanf(nf2_, "%f", &mm_) == 1 && fabsf(mm_) <= 20.0f) g_nudge = mm_ * 0.001f; fclose(nf2_); } } g_grow = 0.005f; FILE *gf_ = fopen("ux0:data/bbpsx/grow.txt", "r"); if (gf_) { float mm_ = 5.0f; if (fscanf(gf_, "%f", &mm_) == 1) g_grow = mm_ * 0.001f; fclose(gf_); } if (g_grow < 0.0f) g_grow = 0.0f; if (g_grow > 0.05f) g_grow = 0.05f; }      // crack_grow
     free(instDyn); instDyn = calloc(nInst ? nInst : 1, 1);
     if (!instDyn) return;
@@ -13480,22 +14842,26 @@ static void bake_static(void) {
     g_bld_clamp = 0;
     heap_log("bake merged"); if (g_bake_oom) maplog("bake: OUT OF MEMORY, the world is incomplete%s%s", "", "");
     TR("bake: instances merged"); chunks = calloc(nBld ? nBld : 1, sizeof(Chunk)); nChunks = 0;
+    uint64_t bk_t0_ = sceKernelGetProcessTimeWide(); size_t bk_vb_ = 0, bk_ib_ = 0;
     for (int b = 0; b < nBld; b++) {
         Bld *B = &blds[b];
         if (B->ni && chunks) {
             Chunk *C = &chunks[nChunks++]; C->tex = B->tex; C->clamp = (uint8_t)B->clamp; C->nidx = B->ni;
             float mn[3] = { 1e30f, 1e30f, 1e30f }, mx[3] = { -1e30f, -1e30f, -1e30f };
             for (uint32_t v = 0; v < B->nv; v++) for (int k = 0; k < 3; k++) { float f = B->v[v * 5 + k]; if (f < mn[k]) mn[k] = f; if (f > mx[k]) mx[k] = f; }
+            if (!strcasecmp(cur_map, "huntersdream")) for (uint32_t v = 0; v < B->nv; v++) { const float *p_ = B->v + v * 5; if (p_[0] > 10.0f && p_[0] < 30.0f && p_[1] > -34.0f && p_[1] < -8.0f && p_[2] < 40.0f) { int gx_ = (int)(p_[0] - 10.0f), gy_ = (int)(p_[1] + 34.0f); if (gx_ >= 0 && gx_ < 20 && gy_ >= 0 && gy_ < 26) { g_roofg_ok = 1; if (p_[2] > g_roofg[gy_][gx_]) g_roofg[gy_][gx_] = p_[2]; } if (p_[2] > g_roofz) { g_roofz = p_[2]; g_roofx = p_[0]; g_roofy = p_[1]; } } }
             for (int k = 0; k < 3; k++) C->bc[k] = 0.5f * (mn[k] + mx[k]);
             float dx = mx[0] - mn[0], dy = mx[1] - mn[1], dz = mx[2] - mn[2]; C->br = 0.5f * sqrtf(dx*dx + dy*dy + dz*dz) + 0.05f;
-            glGenBuffers(1, &C->vbo); glBindBuffer(GL_ARRAY_BUFFER, C->vbo); glBufferData(GL_ARRAY_BUFFER, (size_t)B->nv * 20, B->v, GL_STATIC_DRAW);
+            glGenBuffers(1, &C->vbo); glBindBuffer(GL_ARRAY_BUFFER, C->vbo); glBufferData(GL_ARRAY_BUFFER, (size_t)B->nv * 20, B->v, GL_STATIC_DRAW); bk_vb_ += (size_t)B->nv * 20; bk_ib_ += (size_t)B->ni * 2;
             glGenBuffers(1, &C->ibo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, C->ibo); glBufferData(GL_ELEMENT_ARRAY_BUFFER, (size_t)B->ni * 2, B->ix, GL_STATIC_DRAW);
         }
         free(B->v); free(B->ix);
     }
     free(blds); blds = NULL; nBld = capBld = 0; TR("bake: buffers made");
+    uint64_t bk_t1_ = sceKernelGetProcessTimeWide();
     if (nChunks > 1) qsort(chunks, nChunks, sizeof(Chunk), chunk_cmp);
     glBindBuffer(GL_ARRAY_BUFFER, 0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    { char bt_[160]; snprintf(bt_, sizeof bt_, "bake timing: %d chunks, buffers %u ms (%u KB vertices, %u KB indices), sort %u ms", nChunks, (unsigned)((bk_t1_ - bk_t0_) / 1000ull), (unsigned)(bk_vb_ / 1024), (unsigned)(bk_ib_ / 1024), (unsigned)((sceKernelGetProcessTimeWide() - bk_t1_) / 1000ull)); maplog("batch: %s%s", bt_, ""); }
     char cb[96]; snprintf(cb, sizeof cb, "baked %u static instances into %d chunks", nstat, nChunks); maplog("batch: %s%s", cb, "");
 }
 static void batch_free(void) {
@@ -13542,6 +14908,7 @@ static void amb_cfg_load(const char *map) {
     float c[7] = { 0.45f, 0.40f, 0.0f, 0.8f, 1.0f, 1.0f, 2.0f };
     if (!strcasecmp(map, "junction")) { c[0] = 0.15f; c[1] = 0.0f; c[2] = 1.0f; c[4] = 0.25f; c[5] = 0.0f; }          // the sewers: water, hardly any weather
     else if (!strcasecmp(map, "boulderbridge")) { c[2] = 0.9f; }
+    else if (!strcasecmp(map, "huntersdream") || !strcasecmp(map, "huntersworkshop")) { c[1] = 0.0f; c[4] = 0.0f; }          /* the Dream: no rain loop, no thunder or lightning flashes (ambient.txt can still override) */
     FILE *f = fopen("ux0:data/bbpsx/ambient.txt", "r");
     if (f) { char ln[200]; while (fgets(ln, sizeof ln, f)) {
         char *col = strchr(ln, ':'); if (!col) continue; *col = 0; char *k = ln; while (*k == ' ' || *k == '\t') k++; char *e = k + strlen(k); while (e > k && (e[-1] == ' ' || e[-1] == '\t')) *--e = 0;
@@ -13551,11 +14918,11 @@ static void amb_cfg_load(const char *map) {
     memcpy(g_amb_cfg, c, sizeof c);
 }
 // ---- boss music: kept in memory only while you are in the arena (mono, 32 kHz); intro -> loop plays without a gap
-static Snd g_mus[8]; static int g_mus_ok, g_mus_state, g_mus_pend; static float g_mus_cur, g_mus_tgt, g_mus_rate = 1.0f;
+static Snd g_mus[8]; static int g_mus_ok, g_mus_state, g_mus_pend, g_hd_mus, g_hd_mus_bad, g_hd_gh; static float g_hd_mvol = 0.55f, g_hd_gvol = 0.30f;      /* g_hd_gh: the track in memory is Gehrman's fight music (snd/mus_gehrman.wav), waiting silent in the burning Dream until he fights you */      /* hd_music: g_hd_mus = the Hunter's Dream's own soundtrack (mus_hd.wav, slot 1) is the music in memory */ static float g_mus_cur, g_mus_tgt, g_mus_rate = 1.0f;
 static void music_free(void) {
     g_vo[MUS_VOICE].on = 0; g_vo[MUS_VOICE].cd = NULL; sceKernelDelayThread(30000);
     for (int i = 0; i < 8; i++) { free(g_mus[i].d); memset(&g_mus[i], 0, sizeof g_mus[i]); }
-    g_mus_ok = 0; g_mus_state = 0; g_mus_pend = 0; g_mus_cur = g_mus_tgt = 0.0f;
+    g_mus_ok = 0; g_mus_state = 0; g_mus_pend = 0; g_mus_cur = g_mus_tgt = 0.0f; g_hd_mus = 0; g_hd_gh = 0;
 }
 static void gi_snd_load(void) { struct mallinfo mi_ = mallinfo(); GILOG("gi: heap before soundtrack %d / %d KB", (int)(mi_.uordblks / 1024), (int)(mi_.arena / 1024)); if (g_mus_ok) music_free(); if (!g_mus[7].d) snd_load_wav("ux0:data/bbpsx/snd/mus_gascut_1.wav", &g_mus[7], 240, 0, 1); if (g_mus[7].d) g_mus_ok = 1; GILOG("gi: soundtrack %d samples (mus_ok %d)", g_mus[7].n, g_mus_ok); }      // gas_intro: the 46 s soundtrack is only in memory while the cutscene plays
 static void music_load(void) {
@@ -13575,6 +14942,7 @@ static void mus_play(int first, int then) {                      // start track 
 }
 static void music_boss(int ev) {                                // 1 = the fight starts, 2 = he turns into the beast, 0 = fade out, -1 = stop now
     snd_log("music event", ev, g_mus_ok * 10 + g_mus_state);
+    if (g_hd_mus) { if (ev == 3 || ev == 4) music_free(); else return; }      /* the Dream's soundtrack ignores boss events (Gehrman's fight has no boss music: it only fades the Dream's track out), and a cutscene takes the music voice over */
     if (!g_mus_ok || !g_snd_run || g_snd_stage < 4) return;
     if (ev == 1) { if (g_mus_state) return; g_mus_state = 1; if (cb_map() && g_mus[5].d) mus_play(4, 5); else mus_play(0, 1); g_mus_cur = 0.0f; g_mus_tgt = 1.0f; g_mus_rate = 1.2f; }
     else if (ev == 2) { if (g_mus_state == 2 || !g_mus_state) return; g_mus_state = 2; g_mus_tgt = 0.0f; g_mus_rate = 3.5f; g_mus_pend = 1; }
@@ -13610,20 +14978,44 @@ static void cut_cam(float *ex, float *ey, float *ez, float *fx, float *fy, float
     float pitch = (64.645f + (68.178f - 64.645f) * s) * 0.0174533f, yaw = (-19.720f + (-63.799f + 19.720f) * s) * 0.0174533f;
     *fx = cosf(pitch) * cosf(yaw); *fy = -cosf(pitch) * sinf(yaw); *fz = sinf(pitch);
 }
+static void hd_mus_start(void) {      /* hd_music: the Hunter's Dream soundtrack: one looping file ux0:data/bbpsx/snd/mus_hd.wav (made by make_hd_music.sh), kept in memory only while you are in the Dream; hd_music.txt = volume (default 0.55) */
+    if (g_hd_mus_bad || g_hd_mus || g_mus_ok) return;
+    if (g_hfire) {      /* the burning house has no Dream music, only Gehrman's fight music (silent until he fights you) while he waits */
+        if (!GH_ALIVE) return;
+        snd_load_wav("ux0:data/bbpsx/snd/mus_gehrman.wav", &g_mus[1], 330, 0, 1);
+        if (!g_mus[1].d) { g_hd_mus_bad = 1; maplog(file_exists_("ux0:data/bbpsx/snd/mus_gehrman.wav") ? "gehrman music: snd/mus_gehrman.wav could not be loaded (not enough memory, or not a 16-bit mono WAV under 12 MB)%s%s" : "gehrman music: snd/mus_gehrman.wav is not on the card%s%s", "", ""); return; }
+        { FILE *f = fopen("ux0:data/bbpsx/hd_music.txt", "r"); if (f) { float a = 0.0f, b = 0.0f; int r = fscanf(f, "%f %f", &a, &b); if (r >= 2 && b >= 0.0f && b <= 3.0f) g_hd_gvol = b; fclose(f); } }
+        g_mus_ok = 1; g_hd_mus = 1; g_hd_gh = 1; g_mus_state = 0; g_mus_pend = 0; mus_play(1, 1); g_mus_cur = 0.0f; g_mus_tgt = 0.0f;
+        { char t_[80]; snprintf(t_, sizeof t_, "gehrman music: %d samples, volume %.2f", g_mus[1].n, g_hd_gvol); maplog("%s%s", t_, ""); }
+        return;
+    }
+    snd_load_wav("ux0:data/bbpsx/snd/mus_hd3.wav", &g_mus[0], 240, 0, 1);      /* the phase 3 piece plays first ... */
+    snd_load_wav("ux0:data/bbpsx/snd/mus_hd.wav", &g_mus[1], 240, 0, 1);      /* ... then the phase 1 and 2 loop plays on and repeats */
+    if (!g_mus[1].d) { free(g_mus[0].d); memset(&g_mus[0], 0, sizeof g_mus[0]); g_hd_mus_bad = 1; maplog(file_exists_("ux0:data/bbpsx/snd/mus_hd.wav") ? "hunter's dream music: snd/mus_hd.wav could not be loaded (not enough memory, or not a 16-bit mono WAV under 12 MB)%s%s" : "hunter's dream music: snd/mus_hd.wav is not on the card%s%s", "", ""); return; }
+    { FILE *f = fopen("ux0:data/bbpsx/hd_music.txt", "r"); if (f) { float v = 0.0f; if (fscanf(f, "%f", &v) == 1 && v >= 0.0f && v <= 3.0f) g_hd_mvol = v; fclose(f); } }
+    g_mus_ok = 1; g_hd_mus = 1; g_mus_state = 0; g_mus_pend = 0; mus_play(0, 1); g_mus_cur = 0.0f; g_mus_tgt = 1.0f; g_mus_rate = 0.4f;
+    { char t_[96]; snprintf(t_, sizeof t_, "hunter's dream music: intro %d, loop %d samples, volume %.2f", g_mus[0].n, g_mus[1].n, g_hd_mvol); maplog("%s%s", t_, ""); }
+}
 static void music_update(float dt) {
     if (!g_mus_ok) return;
     Voice *V = &g_vo[MUS_VOICE];
+    if (g_hd_mus) {
+        if (g_hd_gh) { int f_ = BS.fight && gh_map(); g_mus_tgt = f_ ? 1.0f : 0.0f; g_mus_rate = f_ ? 0.2f : 0.45f; }      /* Gehrman's fight music fades in slowly (5 s) when the fight starts and out when it ends */
+        else { if (g_hfire && g_mus_cur <= 0.005f) { music_free(); return; } g_mus_tgt = g_hfire ? 0.0f : 1.0f; g_mus_rate = g_hfire ? 1.2f : 0.5f; }      /* the Dream's track fades out when the house catches fire, then Gehrman's music takes its place */
+        if (!V->on && g_mus_tgt > 0.0f) mus_play(1, 1);
+    }      /* the Dream's track fades out while Gehrman fights you and comes back after */
     if (g_mus_cur < g_mus_tgt) { g_mus_cur += g_mus_rate * dt; if (g_mus_cur > g_mus_tgt) g_mus_cur = g_mus_tgt; } else if (g_mus_cur > g_mus_tgt) { g_mus_cur -= g_mus_rate * dt; if (g_mus_cur < g_mus_tgt) g_mus_cur = g_mus_tgt; }
     if (g_mus_pend && g_mus_cur <= 0.01f) { g_mus_pend = 0; mus_play(2, 3); g_mus_tgt = 1.0f; g_mus_rate = 2.0f; }
     if (g_mus_tgt <= 0.0f && g_mus_cur <= 0.005f && !g_mus_pend) { V->on = 0; return; }
-    V->vl = V->vr = g_mus_cur * g_amb_cfg[6]; // louder boss music (v2)
+    V->vl = V->vr = g_mus_cur * (g_hd_mus ? (g_hd_gh ? g_hd_gvol : g_hd_mvol) : g_amb_cfg[6]); // louder boss music (v2)
     { static float lt_; lt_ -= dt; if (lt_ <= 0.0f && g_mus_state) { lt_ = 4.0f; snd_log("music voice on/state/vol%", V->on * 10 + g_mus_state, (int)(V->vl * 100.0f)); snd_log("music pos/len", (int)V->pos, V->n); } }
 }
 static void amb_update(float dt, float px, float py, float pz, int dead) {
     if (!g_snd_run || g_snd_stage < 4) return;
     if (strcmp(g_amb_map, cur_map)) { snprintf(g_amb_map, sizeof g_amb_map, "%s", cur_map); amb_cfg_load(cur_map); g_thunder_t = 12.0f + frand() * 30.0f; g_bell_t = 45.0f + frand() * 60.0f; g_thunder_pend = 0;
-        int arena = !strcasecmp(cur_map, "gascoignearena") || !strcasecmp(cur_map, "clericbeastarena");
-        if (arena && !g_mus_ok) music_load(); else if (!arena && g_mus_ok) music_free(); }
+        int arena = !strcasecmp(cur_map, "gascoignearena") || !strcasecmp(cur_map, "clericbeastarena") || rom_map();
+        if (arena && (!g_mus_ok || g_hd_mus)) { if (g_hd_mus) music_free(); music_load(); } else if (!arena && g_mus_ok && !(g_hd_mus && (!strcasecmp(cur_map, "huntersdream") || !strcasecmp(cur_map, "huntersworkshop")))) music_free(); }      /* the Dream's soundtrack carries on into the Hunter's Workshop */
+    if ((!strcasecmp(cur_map, "huntersdream") || !strcasecmp(cur_map, "huntersworkshop")) && !g_mus_ok && g_cut_t < 0.0f && !g_in_chair ) hd_mus_start();      /* hd_music: the Dream plays its own soundtrack (started again by itself after a cutscene) */
     music_update(dt);
     g_amb_scan -= dt;
     if (g_amb_scan <= 0.0f) {                                       // nearest water surface (xy box distance), a few times a second
@@ -13680,14 +15072,15 @@ static int near_npc(float x, float y, float z) {      // eileen_npc: a friendly 
     for (int i = 0; i < n_en; i++) if ((ENS[i].type == 19 || ENS[i].type == 21 || ENS[i].type == 22) && !ENS[i].hostile && ENS[i].placed && hypotf(ENS[i].p.x - x, ENS[i].p.y - y) < 2.3f && fabsf(ENS[i].p.z - z) < 2.0f) return i;
     return -1;
 }
-static void dlg_close(void) { if (g_gh_post) { g_gh_sel = g_gh_post - 1; g_gh_post = 0; g_gh_ui = 2; } else if (g_gh_ask) { g_gh_ask = 0; if (g_dlg_i >= g_dlg_n) { g_gh_ui = 1; g_gh_sel = 0; } } g_note_who = -1; if (g_dlg_open && g_eil_dd == 1) g_eil_dd = 2; if (g_dlg_open && g_dlg_arena && g_eil_state == 0) g_eil_state = 1; g_dlg_open = 0; g_dlg_arena = 0; g_dlg_cont = 0; }      // eileen_boss: the arena scene ending starts the fight
+static void dlg_close(void) { if (g_doll_post) { g_doll_post = 0; if (g_dlg_who >= 0 && g_dlg_who == g_doll_who && g_dlg_i >= 0) { g_doll_ui = 2; g_doll_sel = 0; memset(g_doll_pend, 0, sizeof g_doll_pend); snd_play(S_LANTERN, 0.6f); } } else if (g_gh_post) { g_gh_sel = g_gh_post - 1; g_gh_post = 0; g_gh_ui = 2; } else if (g_gh_ask) { g_gh_ask = 0; if (g_dlg_i >= g_dlg_n) { g_gh_ui = 1; g_gh_sel = 0; } } g_note_who = -1; if (g_dlg_open && g_eil_dd == 1) g_eil_dd = 2; if (g_dlg_open && g_dlg_arena && g_eil_state == 0) g_eil_state = 1; g_dlg_open = 0; g_dlg_arena = 0; g_dlg_cont = 0; }      // eileen_boss: the arena scene ending starts the fight
 static void dlg_voice(void) {      // eileen_voice: play the clip that goes with the line now showing
     if (g_dlg_i >= 0 && g_dlg_i < g_dlg_n && g_dlg_snd[g_dlg_i] >= 0) {
         int sl = g_dlg_snd[g_dlg_i];
         if (!g_snd_nv[sl] && sl >= S_E_OH && sl < S_COUNT) {      // voice_lazy: the clip was not loaded at start (missing, or the load pass ran out of memory): try it once now, and say so when the file is not there
             char pth[128]; snprintf(pth, sizeof pth, "ux0:data/bbpsx/snd/%s_1.wav", SND_NAMES[sl]);
-            if (snd_load_wav(pth, &g_snd[sl][0], 20, 1, 0)) g_snd_nv[sl] = 1; else { char m_[96]; snprintf(m_, sizeof m_, "Voice clip not found: snd/%s_1.wav", SND_NAMES[sl]); (void)m_; }      // no pop-up for a missing voice clip: the subtitle simply shows without sound
+            if (snd_load_wav(pth, &g_snd[sl][0], 30, 1, 1)) g_snd_nv[sl] = 1; else { static unsigned char lg_[128]; if (sl >= 0 && sl < 128 && !lg_[sl]) { lg_[sl] = 1; char m_[200]; snprintf(m_, sizeof m_, "voice clip not loaded: snd/%s_1.wav (%s)", SND_NAMES[sl], file_exists_(pth) ? "the file is on the card but could not be read: it must be a 16-bit PCM WAV, 12 MB or less" : "the file is missing from the card"); maplog("%s%s", m_, ""); } }      /* (loaded at its own rate, so the sound memory limit cannot refuse it; a clip that still fails is named in the maplog) */      // no pop-up for a missing voice clip: the subtitle simply shows without sound
         }
+        { static int lc_; if (lc_ < 60 && sl >= 0 && sl < S_COUNT) { lc_++; char t_[140]; snprintf(t_, sizeof t_, "voice: %s loaded %d, sound running %d, stage %d, samples %d", SND_NAMES[sl], g_snd_nv[sl], g_snd_run, g_snd_stage, g_snd_nv[sl] ? g_snd[sl][0].n : 0); maplog("%s%s", t_, ""); } }      /* (what the game knows about the clip it is about to play, for the maplog) */
         snd_play_lr(sl, 1.0f, 1.0f, 1.0f);
     }
 }
@@ -13742,9 +15135,14 @@ static void win_talk(int wi) {
 }
 static void arena_scene_start(void);
 static void npc_talk(int i) {      // Eileen the Crow: what she says depends on whether you have met her and on how far the hunt has gone
-    g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = i; g_dlg_name = "Eileen the Crow"; memset(g_dlg_spk, 0, sizeof g_dlg_spk);
+    g_doll_post = 0; g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = i; g_dlg_name = "Eileen the Crow"; memset(g_dlg_spk, 0, sizeof g_dlg_spk);
     if (ENS[i].type == 4 && gh_map()) {      // gehrman_boss: his offer, then the choice
         g_dlg_name = "Gehrman";
+        if (g_rush) {      /* boss_rush: no offer, he joins the hunt at once */
+            g_dlg[g_dlg_n++] = "Dear oh dear. What was it? The hunt, the blood, or the horrible dream?"; g_dlg[g_dlg_n++] = "Tonight, Gehrman joins the hunt...";
+            for (int k = 0; k < g_dlg_n; k++) g_dlg_snd[k] = -1;
+            g_gh_post = 2; g_dlg_arena = 0; g_dlg_cont = 0; g_dlg_t = 0.0f; g_dlg_open = 1; g_dlg_i = 0; dlg_voice(); return;
+        }
         g_dlg[g_dlg_n++] = "Good hunter, you've done well. The night is near its end.";
         g_dlg[g_dlg_n++] = "Now, I will show you mercy.";
         g_dlg[g_dlg_n++] = "You will die, forget the dream, and awake under the morning sun.";
@@ -13765,7 +15163,9 @@ static void npc_talk(int i) {      // Eileen the Crow: what she says depends on 
     if (ENS[i].type == 22) {      // gehrman_npc: Gehrman (the lines come from his blueprint; speaking order is a reading of it)
         static int gh_rep = 0; g_dlg_name = "Gehrman";
         if (!g_gehr_met) { g_gehr_met = 1; g_dlg[g_dlg_n++] = "Ah-hah, you must be the new hunter."; g_dlg[g_dlg_n++] = "I am..."; g_dlg[g_dlg_n++] = "Gehrman, friend to you hunters."; g_dlg[g_dlg_n++] = "Welcome to the Hunter's Dream. This will be your home, for now,"; g_dlg[g_dlg_n++] = "You're sure to be in a fine haze about now, but don't think too hard about all of this."; g_dlg[g_dlg_n++] = "Just go out and kill a few beasts. It's for your own good."; g_dlg[g_dlg_n++] = "You know, it's just what hunters do! You'll get used to it..."; }
-        else switch (gh_rep++ % 4) {
+        else if (g_gb_dead && !g_gb_redo && !g_gehr_oedon) { g_gehr_oedon = 1; g_dlg[g_dlg_n++] = "Ascend to Oedon Chapel."; }      /* gehr_oedon: once Gilbert has fallen, the first thing he says is where to go next */
+        else switch (gh_rep++ % ((g_gb_dead && !g_gb_redo) ? 5 : 4)) {
+            case 4: g_dlg[g_dlg_n++] = "Ascend to Oedon Chapel."; break;
             case 0: g_dlg[g_dlg_n++] = "This was once a safe haven for hunters."; g_dlg[g_dlg_n++] = "A workshop where hunters used blood to enhance their weapons and flesh."; break;
             case 1: g_dlg[g_dlg_n++] = "We don't have as many tools as we once did, but..."; g_dlg[g_dlg_n++] = "You're welcome to use whatever you find."; g_dlg[g_dlg_n++] = "...Even the doll, should it please you..."; break;
             case 2: g_dlg[g_dlg_n++] = "Just go out and kill a few beasts. It's for your own good."; break;
@@ -13779,16 +15179,15 @@ static void npc_talk(int i) {      // Eileen the Crow: what she says depends on 
     if (ENS[i].type == 21) {      // doll_npc: the Doll
         static int doll_rep = 0; g_dlg_name = "The Doll";
         if (!g_doll_met) { g_doll_met = 1; g_dlg[g_dlg_n++] = "Hello, good hunter."; g_dlg[g_dlg_n++] = "I am a doll, here in this dream to look after you."; g_dlg[g_dlg_n++] = "Honourable hunter, pursue the echoes of blood,"; g_dlg[g_dlg_n++] = "and I will channel them into your strength."; }
-        else switch (doll_rep++ % 6) {
+        else switch (doll_rep++ % 4) {      /* only her voiced lines */
             case 0: g_dlg[g_dlg_n++] = "Welcome home, good hunter."; break;
             case 1: g_dlg[g_dlg_n++] = "Did you speak with Gehrman?"; g_dlg[g_dlg_n++] = "He was a hunter long, long ago."; break;
-            case 2: g_dlg[g_dlg_n++] = "Hunters have told me about the church."; break;
-            case 3: g_dlg[g_dlg_n++] = "Ahh, the little ones, inhabitants of the dream..."; g_dlg[g_dlg_n++] = "Speak words, they do not, but still, aren't they sweet?"; break;
-            case 4: g_dlg[g_dlg_n++] = "I do love you."; g_dlg[g_dlg_n++] = "Of course... Isn't that is how you've made me?"; break;
+            case 2: g_dlg[g_dlg_n++] = "Ahh, the little ones, inhabitants of the dream..."; g_dlg[g_dlg_n++] = "They find hunters like yourself..."; g_dlg[g_dlg_n++] = "But still, aren't they sweet?"; g_dlg[g_dlg_n++] = "Over time, countless hunters have visited this dream."; break;
             default: g_dlg[g_dlg_n++] = "May you find your worth in the waking world."; break;
         }
-        for (int k = 0; k < g_dlg_n; k++) g_dlg_snd[k] = -1;
-        g_dlg_open = 1; g_dlg_i = 0; return;
+        { static const struct { const char *t; int s; } DV_[] = { { "Hello, good hunter.", S_DL_1 }, { "I am a doll, here", S_DL_2 }, { "Honourable hunter, pursue", S_DL_3 }, { "and I will channel", S_DL_4 }, { "Welcome home, good hunter.", S_DL_5 }, { "Did you speak with Gehrman", S_DL_6 }, { "He was a hunter long", S_DL_7 }, { "Hunters have told me", S_DL_8 }, { "Ahh, the little ones", S_DL_9 }, { "They find hunters", S_DL_14 }, { "But still, aren't they sweet", S_DL_10 }, { "Over time, countless", S_DL_15 }, { "I do love you.", S_DL_11 }, { "Of course... Isn't that", S_DL_12 }, { "May you find your worth", S_DL_13 } };      /* doll_voice: her lines (snd/doll_1_1.wav ... doll_13_1.wav, cut from the all-dialogues recording); a line with no clip on the card stays silent */
+          for (int k = 0; k < g_dlg_n; k++) { g_dlg_snd[k] = -1; for (unsigned q_ = 0; q_ < sizeof DV_ / sizeof DV_[0]; q_++) if (!strncmp(g_dlg[k], DV_[q_].t, strlen(DV_[q_].t))) g_dlg_snd[k] = DV_[q_].s; } }
+        g_dlg_open = 1; g_dlg_i = 0; dlg_voice(); return;
     }
     if (!strcasecmp(cur_map, "gascoignearena")) {      // arena_scene: in the arena X plays the scene (first time) or she repeats herself
         if (g_eil_state == 3 && g_hk_scene) {      // hk_fight: the talk after Henryk falls (Eileen's lines of the old arena scene, with the badge at the end if you do not have it yet)
@@ -13897,13 +15296,103 @@ static void enemy_build(int i) {      // enemy_build: fills slot i (type and hom
         c->skinned = malloc((size_t)c->nV * 5 * sizeof(float)); memcpy(c->skinned, c->rest, (size_t)c->nV * 5 * sizeof(float));
         c->pose = malloc(per * sizeof(float)); c->tmp = malloc(per * sizeof(float));
     }
+/* ---- rom_fight: Rom and her children are only in memory while you are at her lake (the Hunter's Dream has no room to spare for them) */
+static void char_unload(Char *c) {
+    if (c->tex && c->nT) glDeleteTextures(c->nT, c->tex);
+    if (c->anim) for (uint32_t i = 0; i < c->nA; i++) free(c->anim[i].m);
+    if (c->wanim) for (uint32_t i = 0; i < c->nWA; i++) free(c->wanim[i].m);
+    free(c->tex); free(c->sec); free(c->rest); free(c->vb); free(c->idx); free(c->anim); free(c->wanim); free(c->skinned); free(c->pose); free(c->tmp); free(c->lmb); free(c->lmf);
+    memset(c, 0, sizeof *c);
+}
+static void rom_assets(void) {
+    Enemy *se_ = ECUR; Char *sc_ = CUR;
+    if (rl_map()) {
+        if (!g_rom_have) { CUR = &ROMC; g_rom_have = load_hunter("ux0:data/bbpsx/rom.bin"); maplog("boss: rom.bin %s%s", g_rom_have ? "ok (Rom's lake)" : "missing", ""); }
+        if (!g_spd_have && !en_have[13]) {
+            ECUR = &PROTO[proto_of(13)]; CUR = &ENEMY;
+            if (load_hunter("ux0:data/bbpsx/romchild.bin")) {
+                enemy_init_anims(13);
+                if (EN.a_idle >= 0 || EN.a_run >= 0) { g_spd_have = 1; EN.hp_max = 80.0f; EN.aggro = 12.0f; EN.reach = 2.0f; EN.dmg = 16.0f; EN.bod = 0.8f; EN.hrad = 0.7f; EN.stop = 1.2f; EN.atk_rate = 1.1f; }
+                else { char_unload(&ENEMY); }
+            }
+            maplog("creature: romchild.bin %s%s", g_spd_have ? "ok (Rom's children)" : "missing", "");
+        }
+    } else {
+        if (g_rom_have) { char_unload(&ROMC); g_rom_have = 0; }
+        if (g_spd_have) { char_unload(&PROTO[proto_of(13)].ch); g_spd_have = 0; }
+    }
+    /* lazy_boss: the Amygdala (amyg.bin, amyg2.bin) lives in memory only in the Byrgenwerth arena, the Moon Presence (moonp1.bin, moonp2.bin) only in his water arena; the Hunter's Dream and every other map keep that memory free */
+    if (!strcasecmp(cur_map, "romarena")) {
+        if (!g_amg_have) { CUR = &AMGC; g_anim_half = 1; g_amg_have = load_hunter("ux0:data/bbpsx/amyg.bin"); CUR = &AMGC2; g_amg2_have = g_amg_have && load_hunter("ux0:data/bbpsx/amyg2.bin"); g_anim_half = 0; maplog("boss: amyg.bin %s%s", g_amg_have ? "ok (loaded for this arena)" : "missing", ""); }
+    } else {
+        if (g_amg2_have) { char_unload(&AMGC2); g_amg2_have = 0; }
+        if (g_amg_have) { char_unload(&AMGC); g_amg_have = 0; }
+    }
+    if (moon_map()) {
+        if (!g_moon_have) { CUR = &MOONC[0]; g_anim_half = 1; g_moon_have = load_hunter("ux0:data/bbpsx/moonp1.bin"); CUR = &MOONC[1]; if (g_moon_have && !load_hunter("ux0:data/bbpsx/moonp2.bin")) { MOONC[1] = MOONC[0]; g_moon_alias = 1; } else g_moon_alias = 0; g_anim_half = 0; maplog("boss: moonp1.bin %s%s", g_moon_have ? "ok (loaded for this arena)" : "missing", ""); }
+    } else if (g_moon_have) { if (!g_moon_alias) char_unload(&MOONC[1]); else memset(&MOONC[1], 0, sizeof MOONC[1]); char_unload(&MOONC[0]); g_moon_have = 0; g_moon_alias = 0; }
+    ECUR = se_; CUR = sc_;
+}
+static uint8_t g_xslot[MAX_ENEMIES];      /* hard_extras: 1 = a lone wolf / troll set out beside a group (notices you from further away), 2 = a torch bearer beside a lone troll */
+static uint32_t hx_rng(uint32_t *s_) { *s_ = *s_ * 1664525u + 1013904223u; return *s_ >> 8; }
+static int hx_ord(int t) { return t == 5 || t == 6 || t == 7 || (t >= 8 && t <= 16); }
+static int hx_live(int j) { return hx_ord(ENS[j].type) && !ENS[j].fixed && !ENS[j].corpse; }
+static int hx_free(float x, float y, float z, float mind) { for (int j = 0; j < n_en; j++) if (hx_ord(ENS[j].type) || ENS[j].type == 4) { float dx = ENS[j].hx - x, dy = ENS[j].hy - y; if (dx * dx + dy * dy < mind * mind) return 0; } (void)z; return 1; }
+static int hx_place(int type, float cx, float cy, float cz, float r0, float r1, uint32_t *rg, int slotk) {      /* one extra creature at a floor spot r0..r1 m from (cx, cy), in the open (no wall between), not on top of anyone */
+    if (n_en >= MAX_ENEMIES - 2 || !en_have[type]) return 0;
+    for (int tr = 0; tr < 12; tr++) {
+        float an = (float)(hx_rng(rg) % 6283u) * 0.001f, rr = r0 + (float)(hx_rng(rg) % 1000u) * 0.001f * (r1 - r0), fz;
+        float x = cx + rr * cosf(an), y = cy + rr * sinf(an);
+        if (!cw_floor(&world, x, y, cz + 1.0f, &fz) || fabsf(fz - cz) > 1.2f) continue;
+        float o[3] = { cx, cy, cz + 1.2f }, d[3] = { cosf(an), sinf(an), 0.0f }, th;
+        if (cw_raycast(&world, o, d, rr, &th)) continue;
+        if (!hx_free(x, y, fz, 3.0f)) continue;
+        ENS[n_en].var = 0; ENS[n_en].type = type; ENS[n_en].hx = x; ENS[n_en].hy = y; ENS[n_en].hz = fz; ENS[n_en].hyaw = an + 3.14159265f; g_xslot[n_en] = (uint8_t)slotk; n_en++; return 1;
+    }
+    return 0;
+}
+static void hard_extras(void) {      /* hard_extras: the blood moon puts more creatures on the map. Rules: ordinary creatures only (no bosses, NPCs, sick rooms or the Dream); never in a spot that already holds five or more; the total never passes the slot limit. A group of two or more gets a lone wolf or troll standing off to one side with a longer notice distance, so it reaches you first and you can fight it alone if you do not rush in; a troll standing alone gets a torch bearer beside it. Placement is seeded by the map name, so it is the same every visit, and extras are only ever added after every other creature, so saved kills keep their slots. */
+    memset(g_xslot, 0, sizeof g_xslot);
+    int tier = hard_tier(); if (!tier) return;
+    if (!strcasecmp(cur_map, "huntersdream") || strstr(cur_map, "sickroom") || rom_map() || cb_map() || gb_map() || !strcasecmp(cur_map, "gascoignearena") || !strcasecmp(cur_map, "drydock")) return;
+    for (int i = 0; i < n_en; i++) if (ENS[i].type == 4 || ENS[i].type == 19 || ENS[i].type == 20 || ENS[i].type == 21 || ENS[i].type == 22 || ENS[i].type == 23 || ENS[i].type == 25) return;
+    uint32_t rg = 2166136261u; for (const char *c_ = cur_map; *c_; c_++) rg = (rg ^ (uint32_t)(unsigned char)*c_) * 16777619u; rg += (uint32_t)g_ng * 7919u;
+    int n0 = n_en, grp[MAX_ENEMIES], ng_ = 0; float gcx[MAX_ENEMIES], gcy[MAX_ENEMIES], gcz[MAX_ENEMIES]; int gsz[MAX_ENEMIES]; uint8_t seen[MAX_ENEMIES]; memset(seen, 0, sizeof seen); (void)grp;
+    for (int i = 0; i < n0; i++) {
+        if (seen[i] || !hx_live(i)) continue;
+        int m = 0; float sx = 0, sy = 0, sz = 0;
+        for (int j = 0; j < n0; j++) if (hx_live(j)) { float dx = ENS[j].hx - ENS[i].hx, dy = ENS[j].hy - ENS[i].hy; if (dx * dx + dy * dy < 12.0f * 12.0f && fabsf(ENS[j].hz - ENS[i].hz) < 4.0f) { seen[j] = 1; m++; sx += ENS[j].hx; sy += ENS[j].hy; sz += ENS[j].hz; } }
+        if (m < 1) continue;
+        gcx[ng_] = sx / m; gcy[ng_] = sy / m; gcz[ng_] = sz / m; gsz[ng_] = m; grp[ng_] = i; ng_++;
+    }
+    int ntroll_ok = en_have[7], nwolf_ok = en_have[5], added = 0;
+    for (int pass = 1; pass <= 2; pass++) {      /* pass 1 = tier 1 (and every cycle), pass 2 only from the last hour on, or from the third cycle: slot order of pass 1 never changes */
+        if (pass == 2 && !(tier >= 2 || g_ng >= 2)) break;
+        for (int k = 0; k < ng_; k++) {
+            if (n_en >= MAX_ENEMIES - 2) break;
+            int crowd = 0; for (int j = 0; j < n_en; j++) if (hx_ord(ENS[j].type)) { float dx = ENS[j].hx - gcx[k], dy = ENS[j].hy - gcy[k]; if (dx * dx + dy * dy < 14.0f * 14.0f) crowd++; }
+            if (crowd >= 5) continue;      /* already too many in this room */
+            int pick_troll = ntroll_ok && (!nwolf_ok || (hx_rng(&rg) & 1));
+            if (gsz[k] >= 2) {
+                int t_ = pick_troll ? 7 : (nwolf_ok ? 5 : 0); if (!t_) continue;
+                if (hx_place(t_, gcx[k], gcy[k], gcz[k], 9.0f, 14.0f, &rg, 1)) added++;
+            } else if (pass == 1) {
+                int ti_ = grp[k];
+                if (ENS[ti_].type == 7 && en_have[8] && hx_place(8, ENS[ti_].hx, ENS[ti_].hy, ENS[ti_].hz, 2.5f, 3.5f, &rg, 2)) added++;
+            }
+        }
+    }
+    if (added) { char t_[96]; snprintf(t_, sizeof t_, "hard tier %d (cycle %d): %d extra creatures, %d on the map", tier, g_ng + 1, added, n_en); maplog("%s%s", t_, ""); }
+}
 static void setup_enemies(void) {                 // (re)build the enemy list from this map's creature placements
+    rom_assets();      /* rom_fight: load or free her models first */
+    g_amyg_on = rom_map() && (rl_map() ? g_rom_have : (moon_map() ? g_moon_have : g_amg_have)); if (moon_map()) { g_moon_form = 0; { FILE *mf_ = fopen("ux0:data/bbpsx/moon_phase.txt", "r"); if (mf_) { int v_ = 0; if (fscanf(mf_, "%d", &v_) == 1 && v_ == 2) g_moon_form = 1; fclose(mf_); } } g_moon_start = g_moon_form; } if (cb_map() && (cb_ok || g_amg_have || g_moon_have || g_rom_have)) cb_init();      // rom_arena: the Cleric Beast's phase table is rebuilt for whichever model this arena uses
     for (int i = 0; i < n_en; i++) { free(ENS[i].ch.skinned); free(ENS[i].ch.pose); free(ENS[i].ch.tmp); }
     memset(ENS, 0, sizeof ENS); g_note_who = -1;
     g_toni_t = 0.0f; n_en = 0; BS.idx = -1; BS.fog = 0.0f; BS.fight = 0; lamps_gate();
     { FILE *gf_ = fopen("ux0:data/bbpsx/gb_gate.txt", "r"); if (gf_) { float a_, b_; if (fscanf(gf_, "%f %f", &a_, &b_) == 2 && a_ > 0.3f && a_ < 6.0f && b_ > 1.0f && b_ < 12.0f) { g_gb_dhw = a_; g_gb_dh = b_; } fclose(gf_); } }
     g_gb_shut = 0; g_gb_fog = 0.0f; { float gz_; g_gb_z = cw_floor(&world, GB_WALL_X, GB_WALL_Y + 0.6f, 9.5f, &gz_) ? gz_ : GB_Z_SIT; }
-    g_cb_shut = 0; g_cb_open = g_cb_dead && !g_cb_redo; g_cb_fog = 0.0f; { float gz; g_cb_z = cw_floor(&world, CB_WALL_X, CB_WALL_Y + 0.6f, 3.0f, &gz) ? gz : 0.0f; }
+    g_cb_shut = 0; g_cb_open = (g_cb_dead && !g_cb_redo) || rom_map(); g_cb_fog = 0.0f; { float gz; g_cb_z = cw_floor(&world, CB_WALL_X, CB_WALL_Y + 0.6f, 3.0f, &gz) ? gz : 0.0f; }
     for (int i = 0; i < NUM_YHARN && en_have[0] && n_en < MAX_ENEMIES; i++) ENS[n_en++].type = 0;
     for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 3 && en_have[0]) { ENS[n_en].type = 0; ENS[n_en].fixed = 1; ENS[n_en].hx = spawns[i].x; ENS[n_en].hy = spawns[i].y; ENS[n_en].hz = spawns[i].z; ENS[n_en].hyaw = spawns[i].yaw; n_en++; }      // Huntsmen placed by the map
     if (!strcasecmp(cur_map, "gascoignearena") && g_gas_dead && !g_gas_redo && g_eil_state == 0) { g_arena_done = 1; g_eil_angry = 0; g_eil_fell = 0; g_eil_keep = 0.0f; }      // hk_fight: the old arena scene is replaced by the fight
@@ -13955,7 +15444,7 @@ static void setup_enemies(void) {                 // (re)build the enemy list fr
     if (!strcasecmp(cur_map, "huntersdream") && en_have[21]) for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 24) {      // doll_npc: the Doll waits in the Hunter's Dream
         ENS[n_en].type = 21; ENS[n_en].fixed = 1; ENS[n_en].hx = 6.75f; ENS[n_en].hy = -12.95f; ENS[n_en].hz = 1.47f;      /* npc_glow: on the glow marker */ { float gz_ = 0.0f; cw_floor(&world, 6.75f, -12.95f, 2.3f, &gz_); { char t_[80]; snprintf(t_, sizeof t_, "doll_pos: floor z %.2f (pinned at %.2f)", gz_, ENS[n_en].hz); maplog("%s%s", t_, ""); } }      /* doll_pos: where she stands now, on whatever floor is there */ ENS[n_en].hyaw = atan2f(spawnY - ENS[n_en].hy, spawnX - ENS[n_en].hx); n_en++;      // doll_face: she faces where the Hunter wakes up
     }
-    g_eil_dd = 0; if (!strcasecmp(cur_map, "drydock") && en_have[19] && !g_gas_dead && g_eil_state < 2) for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 19) {      // eileen_npc: Eileen the Crow waits at the Drydock
+    g_eil_dd = 0; if (!strcasecmp(cur_map, "drydock") && en_have[19] && !gas_night() && g_eil_state < 2) for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 19) {      // eileen_npc: Eileen the Crow waits at the Drydock
         ENS[n_en].type = 19; ENS[n_en].fixed = 1; ENS[n_en].hx = spawns[i].x; ENS[n_en].hy = spawns[i].y; ENS[n_en].hz = spawns[i].z; ENS[n_en].hyaw = spawns[i].yaw; n_en++;
     }
     for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type >= 20 && spawns[i].type <= 22) {      // corpses (crow / rabid dog / werewolf lying dead in the level)
@@ -13966,7 +15455,7 @@ static void setup_enemies(void) {                 // (re)build the enemy list fr
     }
     if (!strcasecmp(cur_map, "ic_firstfloorsickroom")) { for (int i = 0; i < nSpawns; i++) if (spawns[i].type == 17) spawns[i].type = -1; }      // noclinic_wc: no wheelchair men in the clinic (their chairs stay as scenery)
     g_nwlp = 0; for (int i = 0; i < nSpawns && g_nwlp < 16; i++) if (spawns[i].type == 29) { g_wlp[g_nwlp][0] = spawns[i].x; g_wlp[g_nwlp][1] = spawns[i].y; g_wlp[g_nwlp][2] = spawns[i].z; g_nwlp++; }      // wl_patrol: his waypoints
-    if (en_have[25] && g_gas_dead) for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 29) {      // wl_spawn: one WL per map, standing at its first BP_WLPoint
+    if (en_have[25] && gas_night()) for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) if (spawns[i].type == 29) {      // wl_spawn: one WL per map, standing at its first BP_WLPoint
         ENS[n_en].dl_mode = 1; ENS[n_en].type = 25; ENS[n_en].fixed = 1; ENS[n_en].hx = spawns[i].x; ENS[n_en].hy = spawns[i].y; ENS[n_en].hz = spawns[i].z; ENS[n_en].hyaw = spawns[i].yaw; n_en++; { char t_[100]; snprintf(t_, sizeof t_, "wl at %.1f %.1f %.1f", spawns[i].x, spawns[i].y, spawns[i].z); maplog("%s%s", t_, ""); } break; }
     for (int i = 0; i < nSpawns && n_en < MAX_ENEMIES; i++) { int st_ = spawns[i].type, var_ = 0; if (st_ == 18) { var_ = 0; st_ = 7; }      // no_troll_prop: spawn code 18 is a plain troll now (no brick)      // troll_brick: spawn code 18 = the troll with the brick
       if (((st_ >= 1 && st_ <= 2) || (st_ >= 5 && st_ <= 17)) && en_have[st_]) { ENS[n_en].var = var_; ENS[n_en].type = st_; ENS[n_en].hx = spawns[i].x; ENS[n_en].hy = spawns[i].y; ENS[n_en].hz = spawns[i].z; ENS[n_en].hyaw = spawns[i].yaw; n_en++; } }
@@ -13977,7 +15466,11 @@ static void setup_enemies(void) {                 // (re)build the enemy list fr
         BS.wallz = cw_floor(&world, BOSS_WALL_X, BOSS_WALL_Y + 0.6f, 3.0f, &gz) ? gz : spawnZ - 0.9f;
     }
     if (cb_ok && CB_ALIVE && cb_map() && n_en < MAX_ENEMIES) {         // the Cleric Beast (BPC_ClericBeast_2), at the far end of the arena
-        { float kb_ = 20.0f; g_cb_hide_ok = !fopen_exists("ux0:data/bbpsx/cb_nointro.txt"); { FILE *kf_ = fopen("ux0:data/bbpsx/cb_spawn.txt", "r"); if (kf_) { if (fscanf(kf_, "%f", &kb_) != 1) kb_ = 20.0f; fclose(kf_); } } ENS[n_en].type = 4; ENS[n_en].hx = CB_HOME_X; ENS[n_en].hy = CB_HOME_Y + (g_cb_hide_ok ? kb_ : 0.0f); } ENS[n_en].hz = 0.3f; ENS[n_en].hyaw = -1.5708f; BS.idx = n_en; n_en++;
+        { float kb_ = 20.0f; g_cb_hide_ok = !fopen_exists("ux0:data/bbpsx/cb_nointro.txt") && !rom_map(); { FILE *kf_ = fopen("ux0:data/bbpsx/cb_spawn.txt", "r"); if (kf_) { if (fscanf(kf_, "%f", &kb_) != 1) kb_ = 20.0f; fclose(kf_); } } ENS[n_en].type = 4; ENS[n_en].hx = CB_HOME_X; ENS[n_en].hy = CB_HOME_Y + (g_cb_hide_ok ? kb_ : 0.0f); } ENS[n_en].hz = 0.3f; ENS[n_en].hyaw = -1.5708f; BS.idx = n_en; n_en++;
+    }
+    g_rm_nsp = 0;
+    if (rl_map() && g_rom_have && g_spd_have && BS.idx >= 0) for (int k = 0; k < 6 && n_en < MAX_ENEMIES; k++) {      /* rom_fight: her first wave of children (six), in a ring round her */
+        float a_ = 1.0472f * k + 0.4f, r_ = 6.5f + 1.2f * (k % 3); ENS[n_en].type = 13; ENS[n_en].fixed = 1; ENS[n_en].hx = CB_HOME_X + cosf(a_) * r_; ENS[n_en].hy = CB_HOME_Y + sinf(a_) * r_; ENS[n_en].hz = 0.3f; ENS[n_en].hyaw = a_; g_rm_sp[g_rm_nsp++] = n_en; n_en++;
     }
     if (gb_ok && GB_ALIVE && gb_map() && n_en < MAX_ENEMIES) {         // gilbert_boss: BPC_Gilb_2 on his table
         ENS[n_en].type = 4; ENS[n_en].hx = 2.438f; ENS[n_en].hy = 72.262f; ENS[n_en].hz = GB_Z_SIT; ENS[n_en].hyaw = 3.4f; BS.idx = n_en; n_en++;
@@ -13996,7 +15489,9 @@ static void setup_enemies(void) {                 // (re)build the enemy list fr
     }
     if (!cb_map() && GAS_ALIVE && en_have[5] && n_en < MAX_ENEMIES && !strcasecmp(cur_map, "gascoignearena")) { ENS[n_en].type = 5; ENS[n_en].corpse = 2; ENS[n_en].fixed = 1; ENS[n_en].hx = GI_X; ENS[n_en].hy = GI_Y; ENS[n_en].hz = -300.0f; ENS[n_en].hyaw = 0.0f; n_en++; }      // gas_intro: the werewolf actor
     if (en_have[24]) for (int k = 0; k < g_nlev && n_en < MAX_ENEMIES; k++) { ENS[n_en].type = 24; ENS[n_en].fixed = 1; ENS[n_en].hx = g_lev[k].x; ENS[n_en].hy = g_lev[k].y; ENS[n_en].hz = g_lev[k].z; ENS[n_en].hyaw = g_lev[k].yaw + lever_flip_rad(); ENS[n_en].dl_mode = 100 + k; n_en++; }      // lever_mesh (lever_flip: turned round so it swings the way the hunter's arm does): a lever model at every BP_Switch
+    hard_extras();      /* hard_tier: after everything else, so no earlier slot moves */
     for (int i = 0; i < n_en; i++) enemy_build(i);
+    for (int i = 0; i < n_en; i++) if (g_xslot[i] == 1) ENS[i].aggro *= 1.6f;      /* the lone wolf / troll notices you sooner than the group does */
     uint8_t wused[32] = { 0 };
     chairs_lower();
     gb_bed_apply();
@@ -14062,10 +15557,11 @@ static void mstate_restore(void) {
     for (int i = 0; i < nPicks && i < m->np; i++) picks[i].taken = m->ptaken[i];
 }
 // save.bin: the per-map memory above, written to the Vita so doors, kills and pickups survive quitting. Enemies and items only come back from dying or resting at a lamp.
-typedef struct { int echoes; EchoDrop drop; char lamp_map[40]; float lx, ly, lz; int lamp_set; int gas_dead; InvSlot inv[MAX_INV]; char quick[6][24]; int quick_sel; int eq[4], eq_r, eq_l, eq_set; int att[2], att_set; int eileen_met; int arena_done; int eil_state; int stats[5]; int doll_met; int wlv[12]; int gil_gone; int wown[12]; int attown[2][10]; int doll_hi; int hd_done; char litmap[128][32]; float litx[128], lity[128]; int lit_n; int dream_seen; int vb_set, vials_s, bullets_s, gift_s[2]; int sick_open; int insight; int redo_gas, redo_cb; int gb_dead; int gh_dead; int gh_redo; int gb_redo; int cb_dead; int arcane; int ng; int wstore[12]; int astore[2][10]; InvSlot istore[MAX_INV]; int mhat, mhat_own; } EchoSave;     // new fields go last: older saves are a prefix
+typedef struct { int echoes; EchoDrop drop; char lamp_map[40]; float lx, ly, lz; int lamp_set; int gas_dead; InvSlot inv[MAX_INV]; char quick[6][24]; int quick_sel; int eq[4], eq_r, eq_l, eq_set; int att[2], att_set; int eileen_met; int arena_done; int eil_state; int stats[5]; int doll_met; int wlv[12]; int gil_gone; int wown[12]; int attown[2][10]; int doll_hi; int hd_done; char litmap[128][32]; float litx[128], lity[128]; int lit_n; int dream_seen; int vb_set, vials_s, bullets_s, gift_s[2]; int sick_open; int insight; int redo_gas, redo_cb; int gb_dead; int gh_dead; int gh_redo; int gb_redo; int cb_dead; int arcane; int ng; int wstore[12]; int astore[2][10]; InvSlot istore[MAX_INV]; int mhat, mhat_own; int wx_own[3], wx_store[3], wx_lv[3]; int gh_beaten; int rom_seen; int amg_dead; int ml_own, ml_store, ml_lv, moon_seen; int shop_unl; float hk_hp, hk_eh; } EchoSave;      /* (moonlight_sword: its fields are added at the end, so older saves still load) */      /* wx_*: weapon ids 12..14 (ids 0..11 keep their arrays above) */
+     // new fields go last: older saves are a prefix
 static MapState last_written[MAX_MAPS]; static EchoSave last_es; static int have_last;
 static void save_write(int force) {
-    EchoSave es; memset(&es, 0, sizeof es); quick_ready(); memcpy(es.inv, g_inv, sizeof es.inv); memcpy(es.quick, g_quick, sizeof es.quick); es.quick_sel = g_quick_sel; memcpy(es.eq, g_eq, sizeof es.eq); es.eq_r = g_eq_r; es.eq_l = g_eq_l; es.eq_set = 1; memcpy(es.wstore, g_wstore, sizeof es.wstore); memcpy(es.astore, g_astore, sizeof es.astore); memcpy(es.istore, g_istore, sizeof es.istore); es.mhat = g_mhat; es.mhat_own = g_mhat_own; es.att[0] = g_att[0]; es.att[1] = g_att[1]; es.att_set = 1; es.echoes = g_echoes; es.drop = g_drop; snprintf(es.lamp_map, sizeof es.lamp_map, "%s", g_lamp_map); es.lx = g_lamp_x; es.ly = g_lamp_y; es.lz = g_lamp_z; es.lamp_set = g_lamp_set; es.gas_dead = g_gas_dead; es.eileen_met = g_eileen_met; es.arena_done = g_arena_done; es.eil_state = g_eil_state; memcpy(es.stats, g_stat, sizeof es.stats); es.arcane = g_stat[5]; es.ng = g_ng; es.doll_met = g_doll_met; memcpy(es.wlv, g_wlv, sizeof g_wlv); es.gil_gone = g_gil_gone; memcpy(es.wown, g_wown, sizeof g_wown); memcpy(es.attown, g_att_own, sizeof g_att_own); es.doll_hi = g_doll_hi; es.hd_done = g_hd_done; memcpy(es.litmap, g_lit_map, sizeof g_lit_map); memcpy(es.litx, g_lit_x, sizeof g_lit_x); memcpy(es.lity, g_lit_y, sizeof g_lit_y); es.lit_n = g_lit_n; es.dream_seen = g_dream_seen; es.vb_set = 1; es.vials_s = g_cur_vials >= 0 ? g_cur_vials : g_start_vials; es.bullets_s = g_cur_bullets >= 0 ? g_cur_bullets : g_start_bullets; es.gift_s[0] = g_gift_taken[0]; es.gift_s[1] = g_gift_taken[1]; es.sick_open = g_sick_open; es.insight = g_insight; es.redo_gas = g_gas_redo; es.redo_cb = g_cb_redo; es.gb_dead = g_gb_dead; es.gh_dead = g_gh_dead; es.gh_redo = g_gh_redo; es.gb_redo = g_gb_redo; es.cb_dead = g_cb_dead;      // cb_saved: the Cleric Beast stays dead after quitting
+    EchoSave es; memset(&es, 0, sizeof es); quick_ready(); memcpy(es.inv, g_inv, sizeof es.inv); memcpy(es.quick, g_quick, sizeof es.quick); es.quick_sel = g_quick_sel; memcpy(es.eq, g_eq, sizeof es.eq); es.eq_r = g_eq_r; es.eq_l = g_eq_l; es.eq_set = 1; memcpy(es.wstore, g_wstore, sizeof es.wstore); for (int k_ = 0; k_ < 3; k_++) { es.wx_store[k_] = g_wstore[12 + k_]; es.wx_own[k_] = g_wown[12 + k_]; es.wx_lv[k_] = g_wlv[12 + k_]; } es.gh_beaten = g_gh_beaten; es.shop_unl = g_shop_unl; es.hk_hp = g_hk_hp; es.hk_eh = g_hk_eh; es.rom_seen = g_rom_seen; es.amg_dead = amg_dead_get(); es.ml_own = g_wown[15]; es.ml_store = g_wstore[15]; es.ml_lv = g_wlv[15]; es.moon_seen = g_moon_seen; memcpy(es.astore, g_astore, sizeof es.astore); memcpy(es.istore, g_istore, sizeof es.istore); es.mhat = g_mhat; es.mhat_own = g_mhat_own; es.att[0] = g_att[0]; es.att[1] = g_att[1]; es.att_set = 1; es.echoes = g_echoes; es.drop = g_drop; snprintf(es.lamp_map, sizeof es.lamp_map, "%s", g_lamp_map); es.lx = g_lamp_x; es.ly = g_lamp_y; es.lz = g_lamp_z; es.lamp_set = g_lamp_set; es.gas_dead = g_rush ? g_rs[0] : g_gas_dead; es.eileen_met = g_eileen_met; es.arena_done = g_arena_done; es.eil_state = g_eil_state; memcpy(es.stats, g_stat, sizeof es.stats); es.arcane = g_stat[5]; es.ng = g_ng; es.doll_met = g_doll_met; memcpy(es.wlv, g_wlv, sizeof es.wlv); es.gil_gone = g_gil_gone; memcpy(es.wown, g_wown, sizeof es.wown); memcpy(es.attown, g_att_own, sizeof g_att_own); es.doll_hi = g_doll_hi; es.hd_done = g_hd_done; memcpy(es.litmap, g_lit_map, sizeof g_lit_map); memcpy(es.litx, g_lit_x, sizeof g_lit_x); memcpy(es.lity, g_lit_y, sizeof g_lit_y); es.lit_n = g_lit_n; es.dream_seen = g_dream_seen; es.vb_set = 1; es.vials_s = g_cur_vials >= 0 ? g_cur_vials : g_start_vials; es.bullets_s = g_cur_bullets >= 0 ? g_cur_bullets : g_start_bullets; es.gift_s[0] = g_gift_taken[0]; es.gift_s[1] = g_gift_taken[1]; es.sick_open = g_sick_open; es.insight = g_insight; es.redo_gas = g_rush ? g_rs[4] : g_gas_redo; es.redo_cb = g_rush ? g_rs[5] : g_cb_redo; es.gb_dead = g_rush ? g_rs[2] : g_gb_dead; es.gh_dead = g_rush ? g_rs[3] : g_gh_dead; es.gh_redo = g_rush ? g_rs[7] : g_gh_redo; es.gb_redo = g_rush ? g_rs[6] : g_gb_redo; es.cb_dead = g_rush ? g_rs[1] : g_cb_dead;      // cb_saved: the Cleric Beast stays dead after quitting
     if (!force && have_last && !memcmp(last_written, mstate, sizeof mstate) && !memcmp(&last_es, &es, sizeof es)) return;
     char sp_[96]; slot_file(sp_, sizeof sp_, "save", "bin", g_slot); FILE *f = fopen(sp_, "wb");
     if (!f) { maplog("save.bin: could not open for writing%s%s", "", ""); return; }
@@ -14076,7 +15572,7 @@ static void save_write(int force) {
     memcpy(last_written, mstate, sizeof mstate); last_es = es; have_last = 1;
 }
 static void save_load(void) {
-    char sp_[96]; slot_file(sp_, sizeof sp_, "save", "bin", g_slot); FILE *f = fopen(sp_, "rb"); if (!f) { g_intro_new = 1; maplog("save.bin: none found%s%s", "", ""); memset(g_istore, 0, sizeof g_istore); for (int i = 0; i < 12; i++) g_wown[i] = i == 3; for (int i = 0; i < 4; i++) g_eq[i] = -1; g_eq_r = 0; g_eq_l = 2; g_start_vials = g_start_bullets = 0; g_gift_taken[0] = g_gift_taken[1] = 0; inv_add("HuntersMarkBold", "HUNTERS MARK", 2, 1); return; }      // hunters_mark_start: one mark in the bag of a new hunter      // starter_kit: a new game has nothing but fists, no vials and no bullets
+    char sp_[96]; slot_file(sp_, sizeof sp_, "save", "bin", g_slot); FILE *f = fopen(sp_, "rb"); if (!f) { g_intro_new = 1; maplog("save.bin: none found%s%s", "", ""); g_rom_seen = 0; g_gh_beaten = 0; g_shop_unl = 0; g_story = 0; g_moon_seen = 0; { char sq_[96]; slot_file(sq_, sizeof sq_, "story", "txt", g_slot); remove(sq_); }      /* (a new hunter starts with no story: an erased hunter's story.txt used to be read back, which opened the travel list's Moonside Lake and Byrgenwerth in a new game) */ amg_dead_set(0); g_amg_rez = 0; { char lq_[96]; slot_file(lq_, sizeof lq_, "ladders", "txt", g_slot); remove(lq_); g_lad_ndone = 0; }      /* (a new hunter starts with every ladder up and every lever unpulled, even if an erased one left its file behind) */ memset(g_istore, 0, sizeof g_istore); for (int i = 0; i < 12; i++) g_wown[i] = i == 3; for (int i = 0; i < 4; i++) g_eq[i] = -1; g_eq_r = 0; g_eq_l = 2; g_start_vials = g_start_bullets = 0; g_gift_taken[0] = g_gift_taken[1] = 0; inv_add("HuntersMarkBold", "HUNTERS MARK", 2, 1); return; }      // hunters_mark_start: one mark in the bag of a new hunter      // starter_kit: a new game has nothing but fists, no vials and no bullets
     uint32_t hdr[3] = { 0, 0, 0 };
     if (fread(hdr, sizeof hdr, 1, f) == 1 && hdr[0] == 0x31534242u && hdr[1] == sizeof(MapState) && hdr[2] == MAX_MAPS && fread(mstate, sizeof mstate, 1, f) == 1) {
         EchoSave es; memset(&es, 0, sizeof es);
@@ -14086,14 +15582,21 @@ static void save_load(void) {
         if (nr >= offsetof(EchoSave, eileen_met) + sizeof(int)) g_eileen_met = es.eileen_met != 0;
         if (nr >= offsetof(EchoSave, arena_done) + sizeof(int)) g_arena_done = es.arena_done != 0;
         if (nr >= offsetof(EchoSave, doll_met) + sizeof(int)) { int ok_ = 1; for (int i = 0; i < 5; i++) if (es.stats[i] < 1 || es.stats[i] > 99) ok_ = 0; if (ok_) { memcpy(g_stat, es.stats, sizeof es.stats); g_stat[5] = 10; if (nr >= offsetof(EchoSave, arcane) + sizeof(int) && es.arcane >= 1 && es.arcane <= 99) g_stat[5] = es.arcane; stats_apply(); } g_doll_met = es.doll_met != 0; }      // doll_level
-        if (nr >= offsetof(EchoSave, astore) + sizeof es.astore) { memcpy(g_wstore, es.wstore, sizeof g_wstore); memcpy(g_astore, es.astore, sizeof g_astore); }      // storage: what is kept in the Workshop
+        if (nr >= offsetof(EchoSave, astore) + sizeof es.astore) { memcpy(g_wstore, es.wstore, sizeof es.wstore); memcpy(g_astore, es.astore, sizeof g_astore); }      // storage: what is kept in the Workshop
         g_mhat = 0; g_mhat_own = 0; if (nr >= offsetof(EchoSave, mhat_own) + sizeof(int) && es.mhat >= 0 && es.mhat <= 5) { g_mhat = es.mhat; g_mhat_own = es.mhat_own & 0x1C; if (g_mhat == 1 || g_mhat == 5) g_mhat = 0; }      // messenger_hats
         memset(g_istore, 0, sizeof g_istore); if (nr >= offsetof(EchoSave, istore) + sizeof es.istore) { memcpy(g_istore, es.istore, sizeof g_istore); for (int q_ = 0; q_ < MAX_INV; q_++) { g_istore[q_].key[23] = 0; g_istore[q_].label[27] = 0; if (g_istore[q_].n < 0 || g_istore[q_].n > 99) g_istore[q_].n = 0; } }      // item_store
         if (nr >= offsetof(EchoSave, ng) + sizeof(int) && es.ng >= 0 && es.ng < 100) g_ng = es.ng;      // ngplus
-        if (nr >= offsetof(EchoSave, wlv) + sizeof es.wlv) { int ok_ = 1; for (int i = 0; i < 12; i++) if (es.wlv[i] < 0 || es.wlv[i] > 10) ok_ = 0; if (ok_) memcpy(g_wlv, es.wlv, sizeof g_wlv); }      // wpn_upgrade
+        if (nr >= offsetof(EchoSave, wlv) + sizeof es.wlv) { int ok_ = 1; for (int i = 0; i < 12; i++) if (es.wlv[i] < 0 || es.wlv[i] > 10) ok_ = 0; if (ok_) memcpy(g_wlv, es.wlv, sizeof es.wlv); }      // wpn_upgrade
         if (nr >= offsetof(EchoSave, gil_gone) + sizeof(int)) g_gil_gone = es.gil_gone != 0;
-        if (nr >= offsetof(EchoSave, wown) + sizeof es.wown) memcpy(g_wown, es.wown, sizeof g_wown);;      // weapon_shop: an older save keeps the starting kit and whatever it has equipped
-        for (int k = 0; k < 4; k++) if (g_eq[k] >= 0 && g_eq[k] < 12) g_wown[g_eq[k]] = 1;
+        if (nr >= offsetof(EchoSave, wown) + sizeof es.wown) memcpy(g_wown, es.wown, sizeof es.wown);;      // weapon_shop: an older save keeps the starting kit and whatever it has equipped
+        if (nr >= offsetof(EchoSave, wx_lv) + sizeof es.wx_lv) { for (int k_ = 0; k_ < 3; k_++) { g_wstore[12 + k_] = es.wx_store[k_]; g_wown[12 + k_] = es.wx_own[k_]; g_wlv[12 + k_] = es.wx_lv[k_] >= 0 && es.wx_lv[k_] <= 10 ? es.wx_lv[k_] : 0; } }      /* (a save from before the Burial Blade has none of these) */
+        if (nr >= offsetof(EchoSave, gh_beaten) + sizeof es.gh_beaten) g_gh_beaten = es.gh_beaten != 0;
+        if (nr >= offsetof(EchoSave, shop_unl) + sizeof es.shop_unl) g_shop_unl = es.shop_unl;
+        g_hk_hp = g_hk_eh = 0.0f; if (nr >= offsetof(EchoSave, hk_eh) + sizeof es.hk_eh) { g_hk_hp = es.hk_hp >= 0.0f && es.hk_hp <= 1.0f ? es.hk_hp : 0.0f; g_hk_eh = es.hk_eh >= 0.0f && es.hk_eh <= 1.0f ? es.hk_eh : 0.0f; }
+        if (nr >= offsetof(EchoSave, moon_seen) + sizeof es.moon_seen) { g_wown[15] = es.ml_own != 0; g_wstore[15] = es.ml_store != 0; g_wlv[15] = es.ml_lv >= 0 && es.ml_lv <= 10 ? es.ml_lv : 0; g_moon_seen = es.moon_seen != 0; } else { g_wown[15] = g_wstore[15] = g_wlv[15] = 0; g_moon_seen = 0; }      /* moonlight_sword */
+        if (nr >= offsetof(EchoSave, rom_seen) + sizeof es.rom_seen) g_rom_seen = es.rom_seen != 0; else g_rom_seen = 1;      /* (a save from before this keeps the arena on its list) */
+        if (nr >= offsetof(EchoSave, amg_dead) + sizeof es.amg_dead) { amg_dead_set(es.amg_dead != 0); g_amg_rez = 0; }      /* amg_save: the Amygdala's death belongs to the save (it used to be one file shared by every save, so a kill in an old game kept him away in a new one) */;      /* (older saves: the shop also checks g_gh_dead) */
+        for (int k = 0; k < 4; k++) if (g_eq[k] >= 0 && g_eq[k] < NWPN) g_wown[g_eq[k]] = 1;
         if (nr >= offsetof(EchoSave, attown) + sizeof es.attown) memcpy(g_att_own, es.attown, sizeof g_att_own);
         if (nr >= offsetof(EchoSave, doll_hi) + sizeof(int)) g_doll_hi = es.doll_hi != 0;
         g_hd_done = nr >= offsetof(EchoSave, hd_done) + sizeof(int) ? es.hd_done != 0 : 1;      // hd_intro: a save from before the intro existed has had it
@@ -14111,9 +15614,9 @@ static void save_load(void) {
         g_dream_seen = nr >= offsetof(EchoSave, dream_seen) + sizeof(int) ? es.dream_seen != 0 : 1;      // lamp_gone: an older save has been to the Dream
         for (int sl_ = 0; sl_ < 2; sl_++) if (g_att[sl_] >= 0 && g_att[sl_] < 10) g_att_own[sl_][g_att[sl_]] = 1;      // attire_shop: what you wear is yours
         if (file_exists_("ux0:data/bbpsx/allweapons.txt")) for (int sl_ = 0; sl_ < 2; sl_++) for (int k_ = 0; k_ < 10; k_++) g_att_own[sl_][k_] = 1;
-        if (file_exists_("ux0:data/bbpsx/allweapons.txt")) for (int i = 0; i < 12; i++) g_wown[i] = 1;      // weapon_shop: testing switch
+        if (file_exists_("ux0:data/bbpsx/allweapons.txt")) for (int i = 0; i < NWPN; i++) if (i != 12 && i != 13 && i != 16) g_wown[i] = 1;      // weapon_shop: testing switch
         if (nr >= offsetof(EchoSave, eil_state) + sizeof(int)) g_eil_state = es.eil_state >= 0 && es.eil_state <= 3 ? es.eil_state : 0;
-        if (nr >= offsetof(EchoSave, eq_set) + sizeof(int) && es.eq_set) { for (int i = 0; i < 4; i++) g_eq[i] = es.eq[i] >= -1 && es.eq[i] < 12 && (es.eq[i] < 0 || WPN[es.eq[i]].hand == (i >= 2)) && es.eq[i] != 3 ? es.eq[i] : -1; g_eq_r = es.eq_r == 1 ? 1 : 0; g_eq_l = es.eq_l == 3 ? 3 : 2; wpn_fix_active(); }
+        if (nr >= offsetof(EchoSave, eq_set) + sizeof(int) && es.eq_set) { for (int i = 0; i < 4; i++) g_eq[i] = es.eq[i] >= -1 && es.eq[i] < NWPN && (es.eq[i] < 0 || WPN[es.eq[i]].hand == (i >= 2)) && es.eq[i] != 3 ? es.eq[i] : -1; g_eq_r = es.eq_r == 1 ? 1 : 0; g_eq_l = es.eq_l == 3 ? 3 : 2; wpn_fix_active(); }
         if (nr >= offsetof(EchoSave, att_set) + sizeof(int) && es.att_set) { g_att[0] = es.att[0] >= 0 && es.att[0] < 10 ? es.att[0] : 0; g_att[1] = es.att[1] >= 0 && es.att[1] < 8 ? es.att[1] : 0; }
         if (nr >= offsetof(EchoSave, quick) + sizeof es.quick + sizeof(int)) { memcpy(g_quick, es.quick, sizeof g_quick); for (int i = 0; i < 6; i++) g_quick[i][23] = 0; g_quick_sel = es.quick_sel >= 0 && es.quick_sel < 6 ? es.quick_sel : 0; g_quick_ready = 1; }
         if (nr >= offsetof(EchoSave, quick)) { memcpy(g_inv, es.inv, sizeof g_inv); for (int i = 0; i < MAX_INV; i++) { g_inv[i].key[23] = 0; g_inv[i].label[27] = 0; } }
@@ -14150,6 +15653,9 @@ static void wm_build(void) {      // read the lantern list out of every linked m
     }
     for (int i = 0; i < nMaps && g_wm_n < 158; i++) {
         if (!strcasecmp(maps_[i], "huntersdream")) continue;      // (debug: every map is listed, lanterns first, then its spawn point)
+        if (!strcasecmp(maps_[i], "romlake") && !((g_story & 2) || file_exists_("ux0:data/bbpsx/rom_now.txt"))) continue;      /* (Moonside Lake is not on the list until the chapel note is read) */
+        if (!strcasecmp(maps_[i], "moonarena") && !file_exists_("ux0:data/bbpsx/moon_lantern.txt")) continue;      /* (the Moon Presence's water is off the list unless moon_lantern.txt is on the card: this was only checked for the extra entry, not for the lantern list) */
+        if (!strcasecmp(maps_[i], "romarena") && !ROM_LISTED) continue;      /* (nor is Byrgenwerth until the other sickroom's note is read) */
         static int al_ = -1; if (al_ < 0) al_ = file_exists_("ux0:data/bbpsx/alllamps.txt") ? 1 : 0;      // alllamps.txt = the old debug list (every map and lantern)
         int had_ = 0;
         char p1[160], p2[160]; snprintf(p1, sizeof p1, "ux0:data/bbpsx/interact_%s.bin", maps_[i]); snprintf(p2, sizeof p2, "app0:interact_%s.bin", maps_[i]);
@@ -14169,6 +15675,13 @@ static void wm_build(void) {      // read the lantern list out of every linked m
         free(d);
         if (al_ && g_wm_n < 160) { WmEnt *E = &g_wm[g_wm_n++]; memset(E, 0, sizeof *E); snprintf(E->map, sizeof E->map, "%s", maps_[i]); }      // n = 0: the map's spawn point
     }
+    { int have_ = 0; for (int k = 0; k < g_wm_n; k++) if (!strcasecmp(g_wm[k].map, "romarena")) have_ = 1;      // rom_arena: always offered when its level file is there (the spawn point, next to its lantern), even if the lantern list could not be read
+      if (!have_ && ROM_LISTED && g_wm_n < 160 && file_exists_("ux0:data/bbpsx/level_romarena.bin")) { WmEnt *E = &g_wm[g_wm_n++]; memset(E, 0, sizeof *E); snprintf(E->map, sizeof E->map, "romarena"); } }
+    { int hr_ = 0; for (int k = 0; k < g_wm_n; k++) if (!strcasecmp(g_wm[k].map, "romlake")) hr_ = 1;      /* rom_fight: offered whenever its level file is on the card */
+      if (!hr_ && g_wm_n < 160 && file_exists_("ux0:data/bbpsx/level_romlake.bin") && ((g_story & 2) || file_exists_("ux0:data/bbpsx/rom_now.txt"))) { WmEnt *E = &g_wm[g_wm_n++]; memset(E, 0, sizeof *E); snprintf(E->map, sizeof E->map, "romlake"); } }
+    { int hm_ = 0; for (int k = 0; k < g_wm_n; k++) if (!strcasecmp(g_wm[k].map, "moonarena")) hm_ = 1;      /* moon_arena: offered once you have stood before the Moon Presence (or with moon_now.txt on the card, for testing) */
+      if (!hm_ && g_wm_n < 160 && file_exists_("ux0:data/bbpsx/level_moonarena.bin") && file_exists_("ux0:data/bbpsx/moon_lantern.txt")) { WmEnt *E = &g_wm[g_wm_n++]; memset(E, 0, sizeof *E); snprintf(E->map, sizeof E->map, "moonarena"); } }
+    if (!ROM_LISTED) { int w_ = 0; for (int k = 0; k < g_wm_n; k++) if (strcasecmp(g_wm[k].map, "romarena")) g_wm[w_++] = g_wm[k]; g_wm_n = w_; }      /* rom_seen: the Byrgenwerth arena is on the travel list only after the Amygdala has taken you there once, or you have read the other sickroom's note (in a new game it is not) */
     if (g_wm_n == 0) { const char *fb_ = file_exists_("ux0:data/bbpsx/level_ic_firstfloorsickroom.bin") ? "ic_firstfloorsickroom" : start_map; WmEnt *E = &g_wm[g_wm_n++]; memset(E, 0, sizeof *E); snprintf(E->map, sizeof E->map, "%s", fb_); }      // no lantern lit at all: the way back is the start
     { char t[40]; snprintf(t, sizeof t, "%d", g_wm_n); maplog("tombstone menu: %s lanterns%s", t, ""); }
 }
@@ -14183,30 +15696,45 @@ static int lamp_stand(float *x, float *y, float *z) {       // a spot next to th
 // The lock rules of the game's own door Blueprint (E_WhichDoorState): 0 open, 1 unlocked, 2 locked (needs its key), 3 locked from inside, 4 locked from outside, 5 locked by a device.
 // 3 / 4 are the one-way doors: "Does not open from this side". "Inside" is the back of the door (the side opposite its forward arrow). free_doors.txt on the Vita switches all of this off.
 static int g_doors_free = -1;
+static int chapel_gate_door(const Door *D);
+static int chapel_ok_(void);      /* the gate at the top of the Gascoigne arena's stairs (the one that leads to the Oedon Chapel): found by its position OR as the door standing in front of the loader that goes to the chapel */
 static int door_try(Door *D, float px, float py) {
     if (g_doors_free < 0) g_doors_free = file_exists_("ux0:data/bbpsx/free_doors.txt") ? 1 : 0;
+    if (!strcasecmp(cur_map, "ic_firstfloorsickroom") && fabsf(D->cx + 25.93f) < 1.0f && fabsf(D->cy - 0.84f) < 1.0f) { if (D->st != 0 && D->st != 1) D->st = 1; return 1; }      /* sickroom_exit: the back door is the way out of the starting room, in every game and every new game plus: nothing can lock it */
+    if (!g_doors_free && !strcasecmp(cur_map, "ic_firstfloorsickroom") && fabsf(D->cx + 25.93f) < 1.0f && fabsf(D->cy + 18.66f) < 1.0f) {      /* sick2_door: the starting sickroom's other door (the locked one, y -18.7) opens only once Rom is dead (rom_now.txt on the card: for testing); the back door is the ordinary way out and always opens */
+        if (!(g_story & 4) && !file_exists_("ux0:data/bbpsx/rom_now.txt")) { say("LOCKED"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; }
+        if (D->st != 0 && D->st != 1) { D->st = 1; say("UNLOCKED"); snd_play(S_SWITCH, 0.9f); }
+        return 1;
+    }
+    if (!g_doors_free && chapel_gate_door(D)) {      /* chapel_gate: the gate at the top of the arena stairs (add_arena_gate.sh) opens only for the Lost Hunter Badge, which Gilbert's death gives */
+        if (!chapel_ok_()) { say("LOCKED BY LOST HUNTER BADGE"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; }
+        if (D->st != 0 && D->st != 1) { D->st = 1; say("UNLOCKED"); snd_play(S_SWITCH, 0.9f); }
+        if (!(g_story & 16)) { g_story |= 16; story_save(); }      /* chapel_gate_open: from now on it stands open */
+        return 1;
+    }
+    if (!g_doors_free && !strcasecmp(cur_map, "oedonchapel")) { D->st = 2; say("LOCKED"); snd_play(S_UIBAD, 0.8f); return 0; }      /* chapel_doors: none of the chapel's doors can be opened */
     if (!g_doors_free && !strcasecmp(cur_map, "huntersdream") && D->st >= 2 && D->st != 255) {      // gehrman_boss: the Dream's one locked door (the garden gate) opens once Gilbert is dead
-        if (!g_gb_dead) { say("LOCKED"); snd_play(S_UIBAD, 0.8f); return 0; }
+        if (!g_gb_dead) { say("LOCKED"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; }
         if (D->st != 0 && D->st != 1) { D->st = 1; say("UNLOCKED"); snd_play(S_SWITCH, 0.9f); }
         return 1;
     }
     if (!g_doors_free && !strcasecmp(cur_map, "gilbert") && D->st != 255 && (D->st == 2 || (D->key[0] && !strcasecmp(D->key, "GilbsKey1stFlr")))) {      // gil_gate: the estate's wooden doors open only once Father Gascoigne is dead AND Gilbert has given you his key
-        if (!g_gas_dead) { say("LOCKED"); snd_play(S_UIBAD, 0.8f); return 0; }
-        if (!inv_have("GilbsKey1stFlr")) { say("LOCKED BY GILBS KEY 1ST FLR"); snd_play(S_UIBAD, 0.8f); return 0; }
+        if (!g_gas_dead) { say("LOCKED"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; }
+        if (!inv_have("GilbsKey1stFlr")) { say("LOCKED BY GILBS KEY 1ST FLR"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; }
         if (D->st != 0 && D->st != 1) { D->st = 1; say("UNLOCKED"); snd_play(S_SWITCH, 0.9f); }
         g_gil_gone = 1; return 1;
     }
     if (g_doors_free || D->st == 255 || D->st <= 1) return 1;
     float side = (px - D->cx) * D->afx + (py - D->cy) * D->afy;               // > 0: in front of the door (outside), < 0: behind it (inside)
     switch (D->st) {
-    case 3: if (side < 0.0f) { say("DOES NOT OPEN FROM THIS SIDE"); snd_play(S_UIBAD, 0.8f); return 0; } return 1;
-    case 4: if (side >= 0.0f) { say("DOES NOT OPEN FROM THIS SIDE"); snd_play(S_UIBAD, 0.8f); return 0; } return 1;
+    case 3: if (side < 0.0f) { say("DOES NOT OPEN FROM THIS SIDE"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; } return 1;
+    case 4: if (side >= 0.0f) { say("DOES NOT OPEN FROM THIS SIDE"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0; } return 1;
     case 2:
         if (g_gas_dead && !strcasecmp(cur_map, "gilbert") && fabsf(D->cx + 36.35f) < 1.5f && fabsf(D->cy - 65.5f) < 1.5f) { D->st = 1; say("UNLOCKED"); snd_play(S_SWITCH, 0.9f); return 1; }      // gas_door: the lamp-level double doors into the estate open once Father Gascoigne is dead
         if (D->key[0] && inv_have(D->key)) { D->st = 1; say("UNLOCKED"); snd_play(S_SWITCH, 0.9f); return 1; }
         if (D->key[0]) { char t[72]; snprintf(t, sizeof t, "LOCKED BY %s", D->keyname[0] ? D->keyname : D->key); say(t); } else say("LOCKED");
-        snd_play(S_UIBAD, 0.8f); return 0;
-    case 5: say("LOCKED BY DEVICE"); snd_play(S_UIBAD, 0.8f); return 0;
+        snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0;
+    case 5: say("LOCKED BY DEVICE"); snd_play(S_UIBAD, 0.8f); { char dl_[140]; snprintf(dl_, sizeof dl_, "door refused: %s at %.1f %.1f, state %d, key '%s'", cur_map, D->cx, D->cy, D->st, D->key); maplog("%s%s", dl_, ""); } return 0;
     }
     return 1;
 }
@@ -14214,7 +15742,9 @@ static const struct { const char *map; float x, y, z; } DOOR_SHUT[] = { { "stree
 static void doors_start_open(void) {                  // doors the designers placed already open (LockedState = Open)
     if (!strcasecmp(cur_map, "gilbert")) for (int i = 0; i < nDoors; i++) { char t_[140]; snprintf(t_, sizeof t_, "gilbert door %d at %.1f %.1f %.1f st %d key '%s' dbl %d", i, doors_[i].cx, doors_[i].cy, doors_[i].zc, doors_[i].st, doors_[i].key, doors_[i].dbl); maplog("%s%s", t_, ""); }
     for (int i = 0; i < nDoors; i++) {
-        Door *D = &doors_[i]; if (D->st != 0 || D->open) continue;
+        Door *D = &doors_[i];
+        if (!strcasecmp(cur_map, "oedonchapel") && !g_doors_free) { if (D->open) door_close(D); D->st = 2; continue; }      /* chapel_doors: every door in the Oedon Chapel stands shut and locked */
+        if (D->st != 0 || D->open) continue;
         { int keep_ = 0; for (size_t q = 0; q < sizeof DOOR_SHUT / sizeof DOOR_SHUT[0]; q++) if (!strcasecmp(cur_map, DOOR_SHUT[q].map) && hypotf(D->cx - DOOR_SHUT[q].x, D->cy - DOOR_SHUT[q].y) < 5.0f && fabsf(D->zc - DOOR_SHUT[q].z) < 4.0f) keep_ = 1;
           if (keep_) { D->st = 1; { char t_[100]; snprintf(t_, sizeof t_, "door %d kept shut (%.1f %.1f %.1f)", i, D->cx, D->cy, D->zc); maplog("%s%s", t_, ""); } continue; } }      // doors_shut
         for (int k = 0; k < D->nl; k++) { DoorLeaf *l = &D->lf[k]; l->sgn = (l->ux * D->fy - l->uy * D->fx) > 0.0f ? 1.0f : -1.0f; }
@@ -14228,13 +15758,10 @@ static int en_in_view(float x, float y, float z) {      // perf_cull: skip drawi
     for (int k = 0; k < 6; k++) if (g_fpl_prev[k][0] * x + g_fpl_prev[k][1] * y + g_fpl_prev[k][2] * (z + 1.0f) + g_fpl_prev[k][3] < -3.0f) return 0;
     return 1;
 }
-static void map_tune(const char *name) {      // per-map performance settings (map_tune)
-    g_fog_end = 36.0f; g_nohaze = 0;
-    if (!strcasecmp(name, "greatbonfire")) g_fog_end = 27.0f;
-    else if (!strcasecmp(name, "junction") || !strcasecmp(name, "ge_parta") || !strcasecmp(name, "ge_partb") || !strcasecmp(name, "deepsewers") || !strcasecmp(name, "ic_firstfloorsickroom") || !strcasecmp(name, "huntersworkshop") || !strcasecmp(name, "boulderbridge") || !strcasecmp(name, "poisonchannel") || !strcasecmp(name, "gilbert")) g_fog_end = 28.0f;      /* perf_gas */
-    else if (!strcasecmp(name, "gascoignearena")) g_fog_end = 32.0f;      // perf_cull: the maps that missed 60 fps      // the busiest map: shorter view distance
-    g_fog_user = 0.0f; { char fp_[96]; snprintf(fp_, sizeof fp_, "ux0:data/bbpsx/fog_%s.txt", name); FILE *ff_ = fopen(fp_, "r"); if (ff_) { float v_ = 0.0f; if (fscanf(ff_, "%f", &v_) == 1 && v_ >= 8.0f && v_ <= 76.0f) g_fog_user = v_; fclose(ff_); } }      // fog_cfg: this map's own distance, saved by the FOG row
-    g_fog_map = g_fog_end; if (g_fog_user > 0.0f) g_fog_end = g_fog_user; else if (!g_fog_on) g_fog_end = 80.0f;
+static void map_tune(const char *name) {      // per-map settings (map_tune)
+    (void)name; g_fog_end = g_fog_def; g_nohaze = 0;      /* fog_one: no per-map distances any more */      /* fog_100: every map starts at 100 m (the FOG row in the System menu and ux0:data/bbpsx/fog_<map>.txt still change it per map) */
+    g_fog_user = g_fog_def;
+    g_fog_map = g_fog_end; if (g_fog_user > 0.0f) g_fog_end = g_fog_user; else if (!g_fog_on) g_fog_end = 100.0f;
     glFogf(GL_FOG_END, FOGV_END);
 }
 static void doors_strip(const char *name) {
@@ -14251,8 +15778,82 @@ static void doors_strip(const char *name) {
 }
 static void ldr_prepare(void);
 // sky_export: sky_<map>.bin (every SkyBox of the map, in world space) is drawn first each frame: no fog, no depth, a far projection of its own
-typedef struct { GLuint tex, tex2, vbo, ibo; int ni; } SkyPart;      // tex2: the Hunter's Dream's brighter daytime sky (shown until the house burns)
+typedef struct { GLuint tex, tex2, sil, vbo, ibo; int ni; float cx, cy, cz; } SkyPart;      /* sil: only the black building silhouettes, drawn over the moon; c*: the middle of the sky mesh (the sky is moved to follow the eye, so it never slides) */      // tex2: the Hunter's Dream's brighter daytime sky (shown until the house burns)
 static SkyPart g_sky[8]; static int g_sky_n = 0;
+/* moon: ux0:data/bbpsx/moon.bin (made by make_moon.sh from Moon.png: w, h as two uint32, then w*h RGBA) is drawn in every sky map at one fixed compass direction, so the moon never moves between maps; moon.txt (optional) = "azimuth elevation size" in degrees. The Hunter's Dream gets it too. */
+static int g_moon_aim;      /* blood moon: set when a sky loads; the next frame turns the moon to where the hunter is facing */
+static GLuint g_moon_tex_b, g_moon_tex, g_moon_vbo, g_moon_ibo; static int g_moon_state; static float g_moon_az = 215.0f, g_moon_el = 40.0f, g_moon_sz = 5.5f;
+static void moon_init(void) {
+    g_moon_state = -1; FILE *f = fopen("ux0:data/bbpsx/moon.bin", "rb"); if (!f) return;
+    uint32_t wh[2]; if (fread(wh, 4, 2, f) != 2 || wh[0] < 4 || wh[1] < 4 || wh[0] > 512 || wh[1] > 512) { fclose(f); return; }
+    size_t n = (size_t)wh[0] * wh[1] * 4; uint8_t *px = (uint8_t *)malloc(n); if (!px || fread(px, 1, n, f) != n) { free(px); fclose(f); return; } fclose(f);
+    glGenTextures(1, &g_moon_tex); glBindTexture(GL_TEXTURE_2D, g_moon_tex); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (int)wh[0], (int)wh[1], 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    {   /* the blood moon: the same picture recoloured copper-orange (dark maria stay dark red-brown, the bright face glows amber) */
+        for (size_t k = 0; k < (size_t)wh[0] * wh[1]; k++) { uint8_t *q_ = px + k * 4; float l_ = (q_[0] + q_[1] + q_[2]) * (1.0f / 765.0f); if (l_ > 1.0f) l_ = 1.0f; l_ = powf(l_, 1.15f);
+            float r_ = l_ * 300.0f, g_ = l_ * 165.0f, b_ = l_ * 85.0f;      /* (no floor: the picture's black corners must stay black, the moon is drawn additively) */ q_[0] = r_ > 255.0f ? 255 : (uint8_t)r_; q_[1] = (uint8_t)g_; q_[2] = (uint8_t)b_; }
+        glGenTextures(1, &g_moon_tex_b); glBindTexture(GL_TEXTURE_2D, g_moon_tex_b); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, (int)wh[0], (int)wh[1], 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE); }
+    free(px);
+    static const uint16_t ix[6] = { 0, 1, 2, 0, 2, 3 }; glGenBuffers(1, &g_moon_vbo); glGenBuffers(1, &g_moon_ibo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_moon_ibo); glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof ix, ix, GL_STATIC_DRAW);
+    { FILE *tf = fopen("ux0:data/bbpsx/moon.txt", "r"); if (tf) { float a, b, c; if (fscanf(tf, "%f %f %f", &a, &b, &c) == 3 && c > 0.1f) { g_moon_az = a; g_moon_el = b; g_moon_sz = c; } fclose(tf); } }
+    g_moon_state = 1;
+}
+static GLuint g_mp_tex; static int g_mp_state, g_mp_fw, g_mp_fh, g_mp_cols, g_mp_n; static float g_mp_sc = 1.2f, g_mp_dy = -0.09f, g_mp_fps = 8.9f;      /* moon_pres: the Moon Presence hanging in front of the blood moon: a flip-book of pictures (ux0:data/bbpsx/moonpres.bin, 32 pictures of 224x168 in one 4444 sheet, made from the posed model) so the Vita draws one flat picture and no model; moon_pres.txt = "scale dy fps" */
+static int moonpres_ok(void) { return !g_rush && (g_story & 4) && (g_gh_beaten || g_gh_dead) && amg_dead_get(); }      /* shown only in a blood moon cycle where Gehrman has been killed and the Amygdala fight was won */
+static void moonpres_draw(float cx, float cy, float cz, float rx, float ry, float rz, float ux, float uy, float uz, float h) {
+    { static char lm_[40]; if (strcmp(lm_, cur_map)) { snprintf(lm_, sizeof lm_, "%s", cur_map); char t_[200]; snprintf(t_, sizeof t_, "moon presence gate: boss rush %d, blood moon (Rom dead) %d, Gehrman killed %d, Amygdala dead %d, moonpres.bin on card %d", g_rush != 0, (g_story & 4) != 0, (g_gh_beaten || g_gh_dead) != 0, amg_dead_get() != 0, file_exists_("ux0:data/bbpsx/moonpres.bin") != 0); maplog("%s%s", t_, ""); } }      /* (once per map: which of the conditions is holding him back) */
+    if (!moonpres_ok()) return;
+    if (!g_mp_state) {
+        g_mp_state = -1; FILE *f = fopen("ux0:data/bbpsx/moonpres.bin", "rb"); uint32_t hd[4];
+        if (f && fread(hd, 4, 4, f) == 4 && hd[0] >= 8 && hd[0] <= 512 && hd[1] >= 8 && hd[1] <= 512 && hd[2] >= 1 && hd[3] >= 1 && hd[3] <= 64) {
+            g_mp_fw = (int)hd[0]; g_mp_fh = (int)hd[1]; g_mp_cols = (int)hd[2]; g_mp_n = (int)hd[3]; int rows = (g_mp_n + g_mp_cols - 1) / g_mp_cols, aw = g_mp_fw * g_mp_cols, ah = g_mp_fh * rows;
+            /* the atlas is 2.4 MB: the heap has no room for that in one piece (the world maps run it nearly full), so it is read and uploaded a few rows at a time */
+            int rr_ = 16; uint16_t *px = (uint16_t *)malloc((size_t)aw * rr_ * 2); int ok_ = px != NULL;
+            if (ok_) {
+                glGenTextures(1, &g_mp_tex); glBindTexture(GL_TEXTURE_2D, g_mp_tex); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, aw, ah, 0, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4, NULL);
+                for (int y_ = 0; y_ < ah && ok_; y_ += rr_) { int n_ = ah - y_ < rr_ ? ah - y_ : rr_; if (fread(px, 2, (size_t)aw * n_, f) != (size_t)aw * n_) { ok_ = 0; break; } glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y_, aw, n_, GL_RGBA, GL_UNSIGNED_SHORT_4_4_4_4, px); }
+            }
+            if (ok_) {
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+                g_mp_state = 1; { FILE *tf = fopen("ux0:data/bbpsx/moon_pres.txt", "r"); if (tf) { float a, b, c; if (fscanf(tf, "%f %f %f", &a, &b, &c) == 3 && a > 0.1f && c > 0.5f) { g_mp_sc = a; g_mp_dy = b; g_mp_fps = c; } fclose(tf); } }
+                maplog("moon presence sky picture loaded%s%s", "", "");
+            } else { char t_[120]; snprintf(t_, sizeof t_, "moon presence: could not read the atlas (rows buffer %s, file truncated or unreadable?)", px ? "ok" : "no memory"); maplog("%s%s", t_, ""); }
+            free(px);
+        }
+        if (f) fclose(f); if (g_mp_state < 0) maplog("moon presence sky picture: moonpres.bin missing or bad%s%s", "", "");
+    }
+    if (g_mp_state < 0) return;
+    int fr = ((int)(g_glow_t * g_mp_fps)) % g_mp_n; if (fr < 0) fr = 0; int rows = (g_mp_n + g_mp_cols - 1) / g_mp_cols, col = fr % g_mp_cols, row = fr / g_mp_cols; float aw = (float)(g_mp_fw * g_mp_cols), ah = (float)(g_mp_fh * rows);
+    float u0 = (col * g_mp_fw + 0.5f) / aw, u1 = ((col + 1) * g_mp_fw - 0.5f) / aw, v0 = (row * g_mp_fh + 0.5f) / ah, v1 = ((row + 1) * g_mp_fh - 0.5f) / ah;
+    float hw = h * g_mp_sc, hh = hw * (float)g_mp_fh / (float)g_mp_fw, oy = h * g_mp_dy, k = 0.999f;
+    float qx = cx * 0.0f, v[20];
+    float px0 = cx + ux * oy, py0 = cy + uy * oy, pz0 = cz + uz * oy; (void)qx; (void)k;
+    v[0] = px0 - rx * hw + ux * hh; v[1] = py0 - ry * hw + uy * hh; v[2] = pz0 - rz * hw + uz * hh; v[3] = u0; v[4] = v0;
+    v[5] = px0 + rx * hw + ux * hh; v[6] = py0 + ry * hw + uy * hh; v[7] = pz0 + rz * hw + uz * hh; v[8] = u1; v[9] = v0;
+    v[10] = px0 + rx * hw - ux * hh; v[11] = py0 + ry * hw - uy * hh; v[12] = pz0 + rz * hw - uz * hh; v[13] = u1; v[14] = v1;
+    v[15] = px0 - rx * hw - ux * hh; v[16] = py0 - ry * hw - uy * hh; v[17] = pz0 - rz * hw - uz * hh; v[18] = u0; v[19] = v1;
+    glBindTexture(GL_TEXTURE_2D, g_mp_tex); glBindBuffer(GL_ARRAY_BUFFER, g_moon_vbo); glBufferData(GL_ARRAY_BUFFER, sizeof v, v, GL_STATIC_DRAW); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_moon_ibo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
+    /* the shader writes alpha 1, so the see-through part of the picture would be a black square: cut those pixels out instead */
+    GLint pr_ = 0, cl_ = -1; glGetIntegerv(GL_CURRENT_PROGRAM, &pr_); if (pr_) cl_ = glGetUniformLocation((GLuint)pr_, "alphaCut"); if (cl_ >= 0) glUniform1f(cl_, 0.45f);
+    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);
+    if (cl_ >= 0) glUniform1f(cl_, -1.0f);
+}
+static void moon_draw(float ex, float ey, float ez, int blend_after) {
+    if (!g_moon_state) moon_init(); if (g_moon_state < 0) return;      /* drawn in the Hunter's Dream too now (its own sky no longer shows one) */
+    const float DEG = 0.01745329f, D = 30000.0f; float az = g_moon_az * DEG, el = g_moon_el * DEG, dx = cosf(el) * cosf(az), dy = cosf(el) * sinf(az), dz = sinf(el);
+    float rl = sqrtf(dx * dx + dy * dy); if (rl < 1e-4f) return; float rx = dy / rl, ry = -dx / rl, rz = 0.0f, ux = ry * dz - rz * dy, uy = rz * dx - rx * dz, uz = rx * dy - ry * dx, h = D * tanf(g_moon_sz * 1.0f * DEG);
+    float cx = ex + dx * D, cy = ey + dy * D, cz = ez + dz * D, v[20] = {
+        cx - rx * h + ux * h, cy - ry * h + uy * h, cz - rz * h + uz * h, 0.0f, 0.0f,
+        cx + rx * h + ux * h, cy + ry * h + uy * h, cz + rz * h + uz * h, 1.0f, 0.0f,
+        cx + rx * h - ux * h, cy + ry * h - uy * h, cz + rz * h - uz * h, 1.0f, 1.0f,
+        cx - rx * h - ux * h, cy - ry * h - uy * h, cz - rz * h - uz * h, 0.0f, 1.0f };
+    glBindTexture(GL_TEXTURE_2D, ((g_story & 4) && g_moon_tex_b) ? g_moon_tex_b : g_moon_tex); glBindBuffer(GL_ARRAY_BUFFER, g_moon_vbo); glBufferData(GL_ARRAY_BUFFER, sizeof v, v, GL_STATIC_DRAW); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_moon_ibo);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
+    glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE); glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, 0);      /* additive: any black or dark box around the picture adds nothing */
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); moonpres_draw(cx, cy, cz, rx, ry, rz, ux, uy, uz, h); if (!blend_after) glDisable(GL_BLEND);
+}
 static void txt_sub(char *t, size_t cap, const char *from, const char *to) {      // note_stick: replace every `from` (any letter case) in t, if it fits in cap
     size_t lf = strlen(from), lt = strlen(to); char *p = t;
     for (;;) {
@@ -14272,17 +15873,165 @@ static void notes_load(const char *name) {
     }
     fclose(f);
 }
-static void sky_free(void) { for (int i = 0; i < g_sky_n; i++) { glDeleteTextures(1, &g_sky[i].tex); if (g_sky[i].tex2) glDeleteTextures(1, &g_sky[i].tex2); glDeleteBuffers(1, &g_sky[i].vbo); glDeleteBuffers(1, &g_sky[i].ibo); } g_sky_n = 0; }
-static int map_interior(const char *name) {      // black_sky: maps that are indoors have no sky (and a pure black background); ux0:data/bbpsx/interior.txt adds more map names, one per line
-    static const char *IN[] = { "ic_firstfloorsickroom", "firstfloorsickroom", "ge_parta", "ge_partb", "ge_bossarena", "de_basement", "de_operatingroom", "huntersworkshop", NULL };
+static void sky_free(void) { for (int i = 0; i < g_sky_n; i++) { glDeleteTextures(1, &g_sky[i].tex); if (g_sky[i].tex2) glDeleteTextures(1, &g_sky[i].tex2); if (g_sky[i].sil) glDeleteTextures(1, &g_sky[i].sil); glDeleteBuffers(1, &g_sky[i].vbo); glDeleteBuffers(1, &g_sky[i].ibo); } g_sky_n = 0; }
+static int map_interior(const char *name) {      /* (ge_partb is outdoors: it gets the sky) */      // black_sky: maps that are indoors have no sky (and a pure black background); ux0:data/bbpsx/interior.txt adds more map names, one per line
+    static const char *IN[] = { "ic_firstfloorsickroom", "ic_sickroom2", "firstfloorsickroom", "ge_parta", "ge_bossarena", "de_basement", "de_operatingroom", "huntersworkshop", NULL };
     for (int i = 0; IN[i]; i++) if (!strcasecmp(name, IN[i])) return 1;
     FILE *f = fopen("ux0:data/bbpsx/interior.txt", "r"); if (f) { char ln[80]; while (fgets(ln, sizeof ln, f)) { size_t l = strlen(ln); while (l && (ln[l - 1] == '\n' || ln[l - 1] == '\r' || ln[l - 1] == ' ')) ln[--l] = 0; if (l && !strcasecmp(ln, name)) { fclose(f); return 1; } } fclose(f); }
     return 0;
 }
+static float fog_c(int k) { if (rl_map()) { static const float W_[3] = { 0.66f, 0.70f, 0.76f }; return W_[k]; } if (moon_map()) { static const float Q_[3] = { 0.20f, 0.15f, 0.29f }; return Q_[k]; } if (rom_map()) { static const float M_[3] = { 0.17f, 0.21f, 0.27f }; return M_[k]; } static const float A_[3] = { 0.07f, 0.06f, 0.09f }, B_[3] = { 0.15f, 0.19f, 0.30f }; return A_[k] + B_[k] * g_dream_day; }      // rom_arena: a cold grey-blue mist
+#define FOGC(k) fog_c(k)
+static GLuint g_romfog_tex[3]; static float g_romfog_h = -1.0f; static int g_romfog_n = 3;
+static void romfog_draw(const PS1Shader *sh, const float *pv, float tsec, float ex, float ey, float fogA) {      // rom_fog: pale mist lying in the Rom arena's basin: a few layers of cut-out cloud patches (like the game's fog gates) that really hide what is behind them, faded into the fog colour by distance
+    if (!rom_map() || moon_map()) return;      /* the Amygdala's basin and Rom's lake (the Moon Presence's water stays clear) */
+    if (g_romfog_h < 0.0f) { g_romfog_h = 0.9f; FILE *f = fopen("ux0:data/bbpsx/romfog.txt", "r"); if (f) { float v = 0.0f; int n = 3; int r = fscanf(f, "%f %d", &v, &n); if (r >= 1 && v >= 0.0f && v <= 4.0f) g_romfog_h = v; if (r >= 2 && n >= 1 && n <= 4) g_romfog_n = n; fclose(f); } }      // romfog.txt: "height layers" (default 0.9 3); height 0 = no mist at all (if the frame rate suffers, try "0.9 2")
+    if (g_romfog_h <= 0.0f) return;
+    if (!lampVbo) lamp_init();
+    if (!g_romfog_tex[0]) {
+        static uint8_t px[64 * 64 * 4]; float lat[2][1024]; uint32_t sd = 0x9e3779b9u;
+        for (int t = 0; t < 3; t++) {      // 0 and 1: the dense layers, 2: the top layer, thinner so you can see a little through it
+            for (int o = 0; o < 2; o++) for (int i = 0; i < 1024; i++) { sd = sd * 1664525u + 1013904223u; lat[o][i] = (float)(sd >> 8) / 16777216.0f; }
+            for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++) {
+                float v = 0.0f;
+                for (int o = 0; o < 2; o++) {
+                    int n = o ? 32 : 16; float fx = (float)x * n / 64.0f, fy = (float)y * n / 64.0f; int x0 = (int)fx, y0 = (int)fy; float tx = fx - x0, ty = fy - y0; tx = tx * tx * (3.0f - 2.0f * tx); ty = ty * ty * (3.0f - 2.0f * ty);
+                    int x1 = (x0 + 1) % n, y1 = (y0 + 1) % n; x0 %= n; y0 %= n;
+                    float a = lat[o][y0 * 32 + x0], b = lat[o][y0 * 32 + x1], c = lat[o][y1 * 32 + x0], d = lat[o][y1 * 32 + x1];
+                    v += (o ? 0.4f : 0.6f) * ((a * (1 - tx) + b * tx) * (1 - ty) + (c * (1 - tx) + d * tx) * ty);
+                }
+                int i = (y * 64 + x) * 4; float k = t == 2 ? 0.93f + 0.07f * v : 0.78f + 0.22f * v;      // the top layer is blended with its own brightness as opacity (the shader writes alpha 1), so it is bright: about 95 % opaque
+                px[i] = (uint8_t)(k * 205.0f); px[i + 1] = (uint8_t)(k * 218.0f); px[i + 2] = (uint8_t)(k * 228.0f); px[i + 3] = v > (t == 2 ? 0.52f : 0.44f) ? 255 : 0;      // dense layers about 6 pixels in 10 mist, the top layer about 4 in 10; small clouds (about a metre across), many of them
+            }
+            glGenTextures(1, &g_romfog_tex[t]); tex_upload(g_romfog_tex[t], 64, 64, px);
+        }
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, lampVbo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
+    glUniform1f(sh->affineAmt, 0.0f); glUniform1f(sh->alphaCut, 0.33f);
+    const float T = 20.0f; int cx = (int)floorf(ex / T), cy = (int)floorf(ey / T);
+    for (int L = 0; L < g_romfog_n; L++) {
+        float fz = g_romfog_h * (g_romfog_n == 1 ? 1.0f : (0.12f + 0.88f * (float)L / (float)(g_romfog_n - 1)));
+        glBindTexture(GL_TEXTURE_2D, g_romfog_tex[(L == g_romfog_n - 1 && g_romfog_n > 1) ? 2 : (L & 1)]);
+        glUniform2f(sh->uvOffset, tsec * ((L & 1) ? -0.011f : 0.015f) + L * 0.31f, tsec * ((L & 1) ? 0.008f : -0.006f) + L * 0.17f);
+        int top_ = (L == g_romfog_n - 1 && g_romfog_n > 1); GLboolean bl_ = glIsEnabled(GL_BLEND);
+        if (top_) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_COLOR); glDepthMask(GL_FALSE); }      // the top layer is faintly see-through: dst * (1 - mist) + mist * mist, no depth write so the patches never sort against each other
+        for (int iy = -1; iy <= 1; iy++) for (int ix = -1; ix <= 1; ix++) {
+            float m[16], wvp[16]; memset(m, 0, sizeof m);
+            m[0] = T; m[9] = T; m[6] = 1.0f; m[12] = ((float)(cx + ix) + 0.5f) * T; m[13] = ((float)(cy + iy) + 0.5f) * T; m[14] = fz; m[15] = 1.0f;      // the unit quad stands in x/z: laid flat, its local z runs along world y
+            mat_mul(wvp, pv, m); glUniformMatrix4fv(sh->wvp, 1, GL_FALSE, wvp); glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+        if (top_) { glDepthMask(GL_TRUE); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); if (!bl_) glDisable(GL_BLEND); }
+    }
+    glUniform2f(sh->uvOffset, 0.0f, 0.0f); (void)fogA;
+}
+/* sky_sil: the black building shapes along the bottom (or top) edge of the sky picture: near-black pixels joined to that edge. Out: a black picture that is opaque only on them (drawn after the moon, so the moon sits behind the buildings). In the Hunter's Dream they are painted over with the sky colour above them instead and no picture is made. sky_sil.txt = brightness limit (0-255, default 14). */
+static void sky_silhouette(uint8_t *px, int w, int h, GLuint *out, int fill) {
+    *out = 0; if (w < 8 || h < 8) return; int thr = 14; { FILE *tf = fopen("ux0:data/bbpsx/sky_sil.txt", "r"); if (tf) { int v; if (fscanf(tf, "%d", &v) == 1 && v > 0 && v < 120) thr = v; fclose(tf); } if (fill) thr = thr * 2;      /* the Dream paints over more (dark blue edges too), so no building shape stays */ }
+    uint8_t *m = (uint8_t *)calloc((size_t)w * h, 1); int *st = (int *)malloc(sizeof(int) * (size_t)w * h); if (!m || !st) { free(m); free(st); return; }
+    for (int edge = 0; edge < 2; edge++) {
+        int y0 = edge ? 0 : h - 1, n = 0, cnt = 0; for (int x = 0; x < w; x++) { uint8_t *q = px + ((size_t)y0 * w + x) * 4; if (q[0] * 3 + q[1] * 6 + q[2] < thr * 10) cnt++; }
+        if (cnt < w / 50) continue;
+        memset(m, 0, (size_t)w * h);
+        for (int x = 0; x < w; x++) { uint8_t *q = px + ((size_t)y0 * w + x) * 4; if (q[0] * 3 + q[1] * 6 + q[2] < thr * 10) { m[(size_t)y0 * w + x] = 1; st[n++] = y0 * w + x; } }
+        while (n > 0) { int i = st[--n], x = i % w, y = i / w; const int dx[4] = { 1, -1, 0, 0 }, dy[4] = { 0, 0, 1, -1 };
+            for (int d = 0; d < 4; d++) { int nx = x + dx[d], ny = y + dy[d]; if (nx < 0) nx = w - 1; if (nx >= w) nx = 0; if (ny < 0 || ny >= h) continue; size_t j = (size_t)ny * w + nx; if (m[j]) continue; uint8_t *q = px + j * 4; if (q[0] * 3 + q[1] * 6 + q[2] < thr * 10) { m[j] = 1; st[n++] = (int)j; } } }
+        long tot = 0; for (size_t k = 0; k < (size_t)w * h; k++) tot += m[k]; if (tot < (long)w * h / 400 || tot > (long)w * h * 6 / 10) { memset(m, 0, (size_t)w * h); continue; }
+        if (fill) {      /* paint each column's black part with the nearest sky colour on the far side of it */
+            for (int x = 0; x < w; x++) { int ref = -1; int dirn = edge ? 1 : -1; int y = edge ? 0 : h - 1; for (; y >= 0 && y < h; y += dirn) if (!m[(size_t)y * w + x]) { ref = y; break; } if (ref < 0) continue;
+                for (y = edge ? 0 : h - 1; y >= 0 && y < h; y += dirn) if (m[(size_t)y * w + x]) memcpy(px + ((size_t)y * w + x) * 4, px + ((size_t)ref * w + x) * 4, 4); }
+            break;
+        }
+        int sw = w / 2, sh = h / 2; uint8_t *sp = (uint8_t *)calloc((size_t)sw * sh, 4);
+        if (sp) { for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++) { size_t k = (size_t)y * 2 * w + x * 2; sp[((size_t)y * sw + x) * 4 + 3] = (m[k] || m[k + 1] || m[k + w] || m[k + w + 1]) ? 255 : 0; }
+            glGenTextures(1, out); glBindTexture(GL_TEXTURE_2D, *out); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sw, sh, 0, GL_RGBA, GL_UNSIGNED_BYTE, sp);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT); free(sp); }
+        break;
+    }
+    free(m); free(st);
+}
+/* sky_dream_fill: the Hunter's Dream has no building shapes at all. For each column of the sky picture, look in the foot of the picture (the half next to the edge the shapes are attached to) for the sharpest dark step: a much darker run below a lighter one is the top edge of a rooftop. Everything beneath it is painted with the sky colour just above, so only sky remains. The picture needs no pure black for this (the first version only found shapes that were near-black and joined to the edge). */
+static void sky_dream_clean(uint8_t *px, int w, int h) {      /* the Dream's sky (256x128): the tower tops and the post in the clouds are patched with cloud from elsewhere in the picture, and everything below the horizon is a smooth haze continuing the last clean row, so nothing of the edit shows */
+    if (w < 32 || h < 32) return; size_t n = (size_t)w * h * 4; uint8_t *src = (uint8_t *)malloc(n); if (!src) return; memcpy(src, px, n);
+    const struct { float x0, x1, off, y0, y1; } P[2] = { { 0.46f, 0.66f, -0.30f, 0.14f, 0.53f }, { 0.79f, 0.86f, -0.50f, 0.30f, 0.53f } };
+    int fx = w / 8, fy = h / 7; if (fx < 2) fx = 2; if (fy < 2) fy = 2;
+    for (int p = 0; p < 2; p++) {
+        int X0 = (int)(P[p].x0 * w), X1 = (int)(P[p].x1 * w), Y0 = (int)(P[p].y0 * h), Y1 = (int)(P[p].y1 * h), of = (int)(P[p].off * w);
+        for (int x = X0 - fx; x < X1 + fx; x++) {
+            float ax = fminf(1.0f, fminf((float)(x - (X0 - fx)) / fx, (float)((X1 + fx) - x) / fx)); if (ax <= 0.0f) continue;
+            int xx = ((x % w) + w) % w, sx = (((x + of) % w) + w) % w;
+            for (int y = Y0 - fy; y < Y1 + fy; y++) {
+                if (y < 0 || y >= h) continue;
+                float ay = fminf(1.0f, fminf((float)(y - (Y0 - fy)) / fy, (float)((Y1 + fy) - y) / fy)); float a = ax * (ay > 0.0f ? ay : 0.0f);
+                uint8_t *d = px + ((size_t)y * w + xx) * 4; const uint8_t *q = src + ((size_t)y * w + sx) * 4;
+                for (int c = 0; c < 3; c++) d[c] = (uint8_t)(d[c] * (1.0f - a) + q[c] * a + 0.5f);
+            }
+        }
+    }
+    for (int y = 0; y < h; y++) for (int x = 0; x < 2; x++) { uint8_t *d = px + ((size_t)y * w + x) * 4; const uint8_t *q = px + ((size_t)y * w + 2) * 4; d[0] = q[0]; d[1] = q[1]; d[2] = q[2]; }      /* (a stray dark mark on the picture's left edge) */
+    {   /* below the horizon: the top of the picture turned upside down, so the bottom matches the top (the join is the unshifted mirror; further down the copy slides half a picture sideways so it does not read as a reflection) */
+        int R = h / 2; uint8_t *c0 = (uint8_t *)malloc((size_t)R * w * 4); if (c0) { memcpy(c0, px, (size_t)R * w * 4);
+            for (int y = R; y < h; y++) { int sr = h - 1 - y; if (sr < 0) sr = 0; if (sr >= R) sr = R - 1; float t = (float)(y - R - 6) / 18.0f; if (t < 0.0f) t = 0.0f; if (t > 1.0f) t = 1.0f;
+                for (int x = 0; x < w; x++) for (int c = 0; c < 3; c++) { float a = c0[((size_t)sr * w + x) * 4 + c], b = c0[((size_t)sr * w + (x + w / 2) % w) * 4 + c]; px[((size_t)y * w + x) * 4 + c] = (uint8_t)(a * (1.0f - t) + b * t + 0.5f); } }
+            free(c0); }
+    }
+    float *row = NULL, *ext = NULL;
+    free(row); free(ext); free(src);
+}
+static int sky_dream_fill(uint8_t *px, int w, int h) {
+    if (w < 16 || h < 16) return 0;
+    int *edge = (int *)malloc(sizeof(int) * (size_t)w); if (!edge) return 0; int best_hits = 0, best_dir = 0;
+    for (int dir = 0; dir < 2; dir++) {      /* 0: shapes at the bottom of the picture, 1: at the top */
+        int hits = 0;
+        for (int x = 0; x < w; x++) {
+            edge[x] = -1; float bestd = 0.0f; int by = -1;
+            int ya = dir ? 4 : h / 2, yb = dir ? h / 2 : h - 5;
+            for (int y = ya; y <= yb; y++) {
+                float up = 0, dn = 0;      /* luma 4 rows beyond the step on the sky side, and 4 on the shape side */
+                for (int k = 1; k <= 4; k++) { const uint8_t *qa = px + ((size_t)(dir ? y + k : y - k) * w + x) * 4, *qb = px + ((size_t)(dir ? y - k : y + k) * w + x) * 4; up += (qa[0] * 3 + qa[1] * 6 + qa[2]) * 0.1f; dn += (qb[0] * 3 + qb[1] * 6 + qb[2]) * 0.1f; }
+                up *= 0.25f; dn *= 0.25f; float d = up - dn;
+                if (d > bestd && dn < up * 0.62f) { bestd = d; by = y; }
+            }
+            if (by >= 0 && bestd > 5.0f) { edge[x] = by; hits++; }
+        }
+        if (hits > best_hits) { best_hits = hits; best_dir = dir; }
+        if (dir == 0 && hits > w / 4) break;      /* clearly the bottom */
+        if (dir == 0) { /* look at the top as well before deciding */ }
+    }
+    if (best_hits < w / 20) { free(edge); return 0; }
+    int dir = best_dir;
+    if (dir != 0 || best_hits <= w / 4) {      /* (recompute the edges for the chosen side: the loop may have left the other side's) */
+        for (int x = 0; x < w; x++) {
+            edge[x] = -1; float bestd = 0.0f; int by = -1; int ya = dir ? 4 : h / 2, yb = dir ? h / 2 : h - 5;
+            for (int y = ya; y <= yb; y++) { float up = 0, dn = 0; for (int k = 1; k <= 4; k++) { const uint8_t *qa = px + ((size_t)(dir ? y + k : y - k) * w + x) * 4, *qb = px + ((size_t)(dir ? y - k : y + k) * w + x) * 4; up += (qa[0] * 3 + qa[1] * 6 + qa[2]) * 0.1f; dn += (qb[0] * 3 + qb[1] * 6 + qb[2]) * 0.1f; } up *= 0.25f; dn *= 0.25f; if (up - dn > bestd && dn < up * 0.62f) { bestd = up - dn; by = y; } }
+            if (by >= 0 && bestd > 5.0f) edge[x] = by;
+        }
+    }
+    /* a column with no step of its own takes the nearest columns' step (a rooftop is wider than one column); a column with a star-sized glitch is smoothed by the median of its neighbours */
+    int *e2 = (int *)malloc(sizeof(int) * (size_t)w); if (!e2) { free(edge); return 0; }
+    for (int x = 0; x < w; x++) { int v[17], n = 0; for (int k = -8; k <= 8; k++) { int e = edge[(x + k + w) % w]; if (e >= 0) v[n++] = e; }
+        if (n < 3) { e2[x] = -1; continue; }
+        for (int i = 1; i < n; i++) { int t = v[i], j = i - 1; while (j >= 0 && v[j] > t) { v[j + 1] = v[j]; j--; } v[j + 1] = t; }
+        e2[x] = v[n / 2]; }
+    { int *e3 = (int *)malloc(sizeof(int) * (size_t)w); if (e3) { for (int x = 0; x < w; x++) { int m = e2[x]; for (int k = -4; k <= 4; k++) { int e = e2[(x + k + w) % w]; if (e < 0) continue; if (m < 0 || (dir ? e > m : e < m)) m = e; } e3[x] = m; } memcpy(e2, e3, sizeof(int) * (size_t)w); free(e3); } }      /* (and the highest step within 4 columns, so a rooftop's sides are covered too) */
+    int painted = 0;
+    for (int x = 0; x < w; x++) { int e = e2[x]; if (e < 0) continue;
+        int ref = dir ? e + 6 : e - 6; if (ref < 0) ref = 0; if (ref >= h) ref = h - 1; const uint8_t *rq = px + ((size_t)ref * w + x) * 4;
+        int y0 = dir ? 0 : e - 3, y1 = dir ? e + 3 : h - 1; if (y0 < 0) y0 = 0; if (y1 >= h) y1 = h - 1;
+        for (int y = y0; y <= y1; y++) memcpy(px + ((size_t)y * w + x) * 4, rq, 4); painted++; }
+    free(edge); free(e2); return painted;
+}
 static void sky_load(const char *name) {
-    sky_free();
-    { int in_ = map_interior(name); if (!g_crackdbg) { if (in_) { float bg_[3] = { 0.0f, 0.0f, 0.0f }; FILE *bf_ = fopen("ux0:data/bbpsx/interior_bg.txt", "r"); if (bf_) { float a_, b_, c_; if (fscanf(bf_, "%f %f %f", &a_, &b_, &c_) == 3) { bg_[0] = a_; bg_[1] = b_; bg_[2] = c_; } fclose(bf_); } glClearColor(bg_[0], bg_[1], bg_[2], 1.0f); } else glClearColor(0.07f, 0.06f, 0.09f, 1.0f); } if (in_) return; }      // black_sky: no sky indoors, a black background
-    char p1[160], p2[160]; snprintf(p1, sizeof p1, "ux0:data/bbpsx/sky_%s.bin", name); snprintf(p2, sizeof p2, "app0:sky_%s.bin", name);
+    sky_free(); g_moon_aim = 1;
+    { int in_ = map_interior(name); if (!g_crackdbg) { if (in_) { float bg_[3] = { 0.0f, 0.0f, 0.0f }; FILE *bf_ = fopen("ux0:data/bbpsx/interior_bg.txt", "r"); if (bf_) { float a_, b_, c_; if (fscanf(bf_, "%f %f %f", &a_, &b_, &c_) == 3) { bg_[0] = a_; bg_[1] = b_; bg_[2] = c_; } fclose(bf_); } glClearColor(bg_[0], bg_[1], bg_[2], 1.0f); } else if (!strcasecmp(name, "romarena")) glClearColor(0.17f, 0.21f, 0.27f, 1.0f); else glClearColor(0.07f, 0.06f, 0.09f, 1.0f); } if (in_) return; }      // black_sky: no sky indoors, a black background
+    story_load(); if (!strcasecmp(name, "oedonchapel") && !(g_story & 8)) { g_story |= 8; story_save(); }
+    char nm_[64]; snprintf(nm_, sizeof nm_, "%s", name); int glob_ = 0;      /* sky_all: one sky for every outdoor map (sky_all.txt = the map whose sky it is, default greatbridgeexterior; "off" = every map keeps its own) */
+    if (!g_crackdbg) {      /* (the boss arenas get the shared sky too) */
+        char an_[48] = "greatbridgeexterior"; FILE *af_ = fopen("ux0:data/bbpsx/sky_all.txt", "r"); if (af_) { char t_[48]; if (fscanf(af_, "%47s", t_) == 1) snprintf(an_, sizeof an_, "%s", t_); fclose(af_); }
+        if (strcasecmp(an_, "off")) { char q1_[160], q2_[160]; snprintf(q1_, sizeof q1_, "ux0:data/bbpsx/sky_%s.bin", an_); snprintf(q2_, sizeof q2_, "app0:sky_%s.bin", an_); FILE *tf_ = fopen(q1_, "rb"); if (!tf_) tf_ = fopen(q2_, "rb"); if (tf_) { fclose(tf_); snprintf(nm_, sizeof nm_, "%s", an_); glob_ = 1; } }
+    }
+    int nob_ = !strcasecmp(name, "huntersdream") || !strcasecmp(name, "romarena") || !strcasecmp(name, "moonarena") || !strcasecmp(name, "romlake");      /* the Dream and the boss arenas: no buildings in the sky (lowered, and any shapes painted over) */
+    char p1[160], p2[160]; snprintf(p1, sizeof p1, "ux0:data/bbpsx/sky_%s.bin", nm_); snprintf(p2, sizeof p2, "app0:sky_%s.bin", nm_);
     FILE *f = fopen(p1, "rb"); if (!f) f = fopen(p2, "rb"); if (!f) return;
     char mg[4]; uint32_t np = 0;
     if (fread(mg, 1, 4, f) != 4 || memcmp(mg, "SKY1", 4) || fread(&np, 4, 1, f) != 1) { fclose(f); return; }
@@ -14294,9 +16043,21 @@ static void sky_load(const char *name) {
         float *vt = malloc((size_t)nv * 20); uint32_t *ix = malloc((size_t)ni * 4); uint16_t *ix16 = malloc((size_t)ni * 2);
         int ok = vt && ix && ix16 && fread(vt, 20, nv, f) == nv && fread(ix, 4, ni, f) == ni && nv < 65536 && g_sky_n < 8;
         if (ok) {
-            { float fr_ = !strcasecmp(name, "greatbridgeexterior") ? 0.15f : 0.0f; char sp_[120]; snprintf(sp_, sizeof sp_, "ux0:data/bbpsx/sky_drop_%s.txt", name); FILE *sf_ = fopen(sp_, "r"); if (sf_) { float v_; if (fscanf(sf_, "%f", &v_) == 1) fr_ = v_; fclose(sf_); }
-              if (fr_ != 0.0f && nv > 0) { float zl_ = 1e30f, zh_ = -1e30f; for (uint32_t k = 0; k < nv; k++) { float z_ = vt[k * 5 + 2]; if (z_ < zl_) zl_ = z_; if (z_ > zh_) zh_ = z_; } float dz_ = fr_ * (zh_ - zl_); for (uint32_t k = 0; k < nv; k++) vt[k * 5 + 2] -= dz_; } }      // sky_drop: the whole sky sits lower by this fraction of its own height, so the black band at its foot drops below the horizon (greatbridgeexterior: 0.15; sky_drop_<map>.txt overrides, 0 = off)
-            SkyPart *S = &g_sky[g_sky_n++]; for (uint32_t k = 0; k < ni; k++) ix16[k] = (uint16_t)ix[k]; S->ni = (int)ni;
+            { float fr_ = (glob_ || !strcasecmp(name, "greatbridgeexterior")) ? 0.15f : 0.0f; { FILE *ag_ = fopen("ux0:data/bbpsx/sky_drop_all.txt", "r"); if (ag_) { float v_; if (glob_ && fscanf(ag_, "%f", &v_) == 1) fr_ = v_; fclose(ag_); } } if (nob_) fr_ = 0.5f;      /* the Dream: the sky sits lower still, so only clean cloud shows above the horizon (sky_drop_huntersdream.txt overrides) */ char sp_[120]; snprintf(sp_, sizeof sp_, "ux0:data/bbpsx/sky_drop_%s.txt", name); FILE *sf_ = fopen(sp_, "r"); if (sf_) { float v_; if (fscanf(sf_, "%f", &v_) == 1) fr_ = v_; fclose(sf_); }
+              if (fr_ != 0.0f && nv > 0) { float zl_ = 1e30f, zh_ = -1e30f; for (uint32_t k = 0; k < nv; k++) { float z_ = vt[k * 5 + 2]; if (z_ < zl_) zl_ = z_; if (z_ > zh_) zh_ = z_; } float dz_ = fr_ * (zh_ - zl_); for (uint32_t k = 0; k < nv; k++) vt[k * 5 + 2] -= dz_; if (nob_) { char t_[140]; snprintf(t_, sizeof t_, "sky drop: %s part %u drop %.2f z %.2f..%.2f lowered by %.2f, %u verts", name, (unsigned)i, fr_, zl_, zh_, dz_, (unsigned)nv); maplog("%s%s", t_, ""); } } }      // sky_drop: the whole sky sits lower by this fraction of its own height, so the black band at its foot drops below the horizon (greatbridgeexterior: 0.15; sky_drop_<map>.txt overrides, 0 = off)
+            SkyPart *S = &g_sky[g_sky_n++]; for (uint32_t k = 0; k < ni; k++) ix16[k] = (uint16_t)ix[k]; S->ni = (int)ni; S->sil = 0;
+            { float x0_ = 1e30f, x1_ = -1e30f, y0_ = 1e30f, y1_ = -1e30f, z0_ = 1e30f, z1_ = -1e30f; for (uint32_t k = 0; k < nv; k++) { float *v_ = vt + k * 5; if (v_[0] < x0_) x0_ = v_[0]; if (v_[0] > x1_) x1_ = v_[0]; if (v_[1] < y0_) y0_ = v_[1]; if (v_[1] > y1_) y1_ = v_[1]; if (v_[2] < z0_) z0_ = v_[2]; if (v_[2] > z1_) z1_ = v_[2]; }
+              S->cx = 0.5f * (x0_ + x1_); S->cy = 0.5f * (y0_ + y1_); S->cz = ((z1_ - z0_) < 0.6f * 0.5f * ((x1_ - x0_) + (y1_ - y0_))) ? z0_ : 0.5f * (z0_ + z1_); }      /* a flat dome: its rim is the horizon, so that stands at eye height; a box or sphere is centred */
+            if (nob_ || file_exists_("ux0:data/bbpsx/sky_sil_on.txt")) sky_silhouette(px, wh[0], wh[1], &S->sil, nob_);      /* the buildings are part of the sky picture; the moon is placed above them, so no second black layer is drawn (sky_sil_on.txt on the card brings the old layer back) */
+            if (nob_ && wh[0] == 256 && wh[1] == 128) { sky_dream_clean(px, wh[0], wh[1]);      /* dream_sky_arenas: the boss arenas we built (Byrgenwerth, the lake, the Moon Presence arena) get exactly the Dream's sky: the same clean picture, the same night and blood-moon stages */  maplog("dream sky: rebuilt clean%s%s", "", ""); }
+            else if (nob_) { int pc_ = sky_dream_fill(px, wh[0], wh[1]);
+            if (nob_ && file_exists_("ux0:data/bbpsx/sky_dump.txt")) { char dp_[160]; snprintf(dp_, sizeof dp_, "ux0:data/bbpsx/skydump_%s_%u.ppm", name, (unsigned)i); FILE *df_ = fopen(dp_, "wb"); if (df_) { fprintf(df_, "P6\n%d %d\n255\n", (int)wh[0], (int)wh[1]); for (size_t k_ = 0; k_ < (size_t)wh[0] * wh[1]; k_++) fwrite(px + k_ * 4, 1, 3, df_); fclose(df_); } }      /* sky_dump.txt on the card: save the sky picture as it is after the fill, so it can be looked at */
+ char t_[80]; snprintf(t_, sizeof t_, "dream sky: %d of %d columns painted over", pc_, (int)wh[0]); maplog("%s%s", t_, ""); }
+            {   /* sky_story: 0 = evening (dim orange) from the start until Gascoigne dies, 1 = night (the picture as it is) after him, 2 = the blood moon after Rom (deep purple and red) */
+                int stg_ = (g_story & 4) ? 2 : (gas_night() ? 1 : 0); if (nob_) stg_ = (g_story & 4) ? 2 : 1;
+                { static float dk_ = -1.0f; if (dk_ < 0.0f) { dk_ = 0.62f; FILE *df_ = fopen("ux0:data/bbpsx/sky_dark.txt", "r"); if (df_) { float t_; if (fscanf(df_, "%f", &t_) == 1 && t_ > 0.05f && t_ <= 1.5f) dk_ = t_; fclose(df_); } }      /* sky_dark: the evening sky (before Gascoigne dies) is darker; sky_dark.txt on the card = its brightness, 1 = as before */
+                if (stg_ != 1) { float sk_ = stg_ ? 1.0f : dk_, mr_ = (stg_ ? 0.78f : 1.45f) * sk_, mg_ = (stg_ ? 0.52f : 0.95f) * sk_, mb_ = (stg_ ? 1.25f : 0.62f) * sk_, ar_ = (stg_ ? 20.0f : 52.0f) * sk_, ag_ = (stg_ ? 6.0f : 22.0f) * sk_, ab_ = (stg_ ? 50.0f : 4.0f) * sk_;      /* blood moon stage: deep indigo and violet clouds (the moon itself is recoloured copper) */
+                    for (size_t k = 0; k < (size_t)wh[0] * wh[1]; k++) { uint8_t *q_ = px + k * 4; float r_ = q_[0] * mr_ + ar_, g_ = q_[1] * mg_ + ag_, b_ = q_[2] * mb_ + ab_; q_[0] = r_ > 255 ? 255 : (uint8_t)r_; q_[1] = g_ > 255 ? 255 : (uint8_t)g_; q_[2] = b_ > 255 ? 255 : (uint8_t)b_; } } } }
             glGenTextures(1, &S->tex); glBindTexture(GL_TEXTURE_2D, S->tex);
             glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, wh[0], wh[1], 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -14313,7 +16074,7 @@ static void sky_load(const char *name) {
         free(px); free(vt); free(ix); free(ix16); if (!ok) break;
     }
     fclose(f);
-    { char t[100]; snprintf(t, sizeof t, "sky: %d parts", g_sky_n); maplog("%s%s", t, ""); }
+    { char t[140]; snprintf(t, sizeof t, "sky: %s: %d parts, picture %s%s", name, g_sky_n, nm_, glob_ ? " (shared sky)" : ""); maplog("%s%s", t, ""); }
 }
 static int map_load(const char *name) {
     char l1[160], l2[160], i1[160], i2[160];
@@ -14321,7 +16082,8 @@ static int map_load(const char *name) {
     snprintf(i1, sizeof i1, "ux0:data/bbpsx/interact_%s.bin", name); snprintf(i2, sizeof i2, "app0:interact_%s.bin", name);
     if (!file_exists_(l1) && !file_exists_(l2)) return 0;
     maplog("load %s: saving state%s", name, ""); heap_log("before unload"); mstate_save(); save_write(0);
-    maplog("load %s: unloading old map%s", name, ""); level_unload();
+    maplog("load %s: unloading old map%s", name, ""); if (g_mus_ok) { music_free(); heap_log("music freed"); }      /* the old map's music (tens of MB in the arenas) is let go before the next level is read, or the world bake runs out of memory */
+    level_unload();
     heap_log("after unload"); maplog("load %s: reading level file%s", name, ""); if (!(load_level(l1) || load_level(l2))) return -1;
     heap_log("after level read"); maplog("load %s: floor, sky, notes%s", name, ""); floor_load(name); sky_load(name); notes_load(name); brk_load(name);
     if (!(load_interact(i1) || load_interact(i2)) && !strcmp(name, "junction")) { if (!load_interact("ux0:data/bbpsx/interact.bin")) load_interact("app0:interact.bin"); }
@@ -14485,6 +16247,7 @@ static int slot_info(int slot, int *lvl, int *cyc) {      // is there a hunter i
         if (nr >= offsetof(EchoSave, doll_met) + sizeof(int)) { int t = 0, good = 1; for (int i = 0; i < 5; i++) { if (es.stats[i] < 1 || es.stats[i] > 99) good = 0; t += es.stats[i]; } int arc = 10; if (nr >= offsetof(EchoSave, arcane) + sizeof(int) && es.arcane >= 1 && es.arcane <= 99) arc = es.arcane; if (good) *lvl = t + arc - 50; }
         if (nr >= offsetof(EchoSave, ng) + sizeof(int) && es.ng >= 0 && es.ng < 100) *cyc = es.ng + 1;
         g_si_boss[slot] = (es.gas_dead != 0) + ((nr >= offsetof(EchoSave, gb_dead) + sizeof(int)) ? es.gb_dead != 0 : 0) + ((nr >= offsetof(EchoSave, gh_dead) + sizeof(int)) ? es.gh_dead != 0 : 0) + ((nr >= offsetof(EchoSave, cb_dead) + sizeof(int)) ? es.cb_dead != 0 : 0);
+        { char sp_[96]; slot_file(sp_, sizeof sp_, "story", "txt", slot); FILE *sf_ = fopen(sp_, "r"); if (sf_) { int v_ = 0; if (fscanf(sf_, "%d", &v_) == 1 && (v_ & 4)) g_si_boss[slot]++; fclose(sf_); } }      /* rom_boss: her death is in the story file */
     }
     fclose(f); return 1;
 }
@@ -14587,7 +16350,7 @@ static int title_run(void) {      // returns 1 for new game plus (g_slot is the 
         } else if (level == 2 || level == 3) {
             for (int k = 0; k < 3; k++) { if (have[k]) snprintf(lab[n], sizeof lab[n], "HUNTER %d   LEVEL %d%s", k + 1, lv[k], cy[k] > 1 ? "  NG+" : ""); else snprintf(lab[n], sizeof lab[n], "HUNTER %d   EMPTY", k + 1); items[n] = lab[n]; act[n++] = k; }
             items[n] = "BACK"; act[n++] = 7;
-        } else if (have[cs]) { items[n] = "CONTINUE"; act[n++] = 0; if (g_si_boss[cs] < 4) snprintf(lab[n], sizeof lab[n], "NEW GAME PLUS  %d OF 4 BOSSES", g_si_boss[cs]); else snprintf(lab[n], sizeof lab[n], "NEW GAME PLUS"); items[n] = lab[n]; act[n++] = 1; items[n] = "DELETE THIS HUNTER"; act[n++] = 2; items[n] = "BACK"; act[n++] = 3; }
+        } else if (have[cs]) { items[n] = "CONTINUE"; act[n++] = 0; if (g_si_boss[cs] < 5) snprintf(lab[n], sizeof lab[n], "NEW GAME PLUS  %d OF 5 BOSSES", g_si_boss[cs]); else snprintf(lab[n], sizeof lab[n], "NEW GAME PLUS"); items[n] = lab[n]; act[n++] = 1; items[n] = "DELETE THIS HUNTER"; act[n++] = 2; items[n] = "BACK"; act[n++] = 3; }
         else { items[n] = "BEGIN A NEW HUNTER"; act[n++] = 0; items[n] = "BACK"; act[n++] = 3; }
         if (sel >= n) sel = n - 1;
         sceCtrlPeekBufferPositive(0, &pad, 1); unsigned p = pad.buttons & ~prev; prev = pad.buttons;
@@ -14613,17 +16376,17 @@ static int title_run(void) {      // returns 1 for new game plus (g_slot is the 
                 if (a == 7) { level = 0; sel = 0; conf = 0; note[0] = 0; }
                 else if (level == 2) { cs = a; level = 1; sel = 0; conf = 0; note[0] = 0; }
                 else if (!conf) { conf = 1; snprintf(note, sizeof note, "THIS ERASES HUNTER %d  PRESS X AGAIN", a + 1); }
-                else { char fp_[96]; slot_file(fp_, sizeof fp_, "save", "bin", a); remove(fp_); slot_file(fp_, sizeof fp_, "lastpos", "txt", a); remove(fp_);
+                else { char fp_[96]; slot_file(fp_, sizeof fp_, "save", "bin", a); remove(fp_); slot_file(fp_, sizeof fp_, "lastpos", "txt", a); remove(fp_); slot_file(fp_, sizeof fp_, "ladders", "txt", a); remove(fp_); slot_file(fp_, sizeof fp_, "story", "txt", a); remove(fp_);
                     g_slot = a; { FILE *sf_ = fopen("ux0:data/bbpsx/slot.txt", "w"); if (sf_) { fprintf(sf_, "%d\n", g_slot); fclose(sf_); } } res = 0; break; }
             }
             else if (a == 3) { level = 2; sel = cs; conf = 0; note[0] = 0; }
-            else if (a == 1 && g_si_boss[cs] < 4) { snprintf(note, sizeof note, "DEFEAT ALL FOUR BOSSES FIRST"); }
+            else if (a == 1 && g_si_boss[cs] < 5) { snprintf(note, sizeof note, "DEFEAT ALL FIVE BOSSES FIRST"); }
             else if (a == 0 || a == 1) {
                 if (a == 1 && !conf) { conf = 1; snprintf(note, sizeof note, "PRESS X AGAIN TO BEGIN NEW GAME PLUS"); }
                 else { g_slot = cs; { FILE *sf_ = fopen("ux0:data/bbpsx/slot.txt", "w"); if (sf_) { fprintf(sf_, "%d\n", g_slot); fclose(sf_); } } res = a == 1; break; }
             } else if (a == 2) {
                 if (!conf) { conf = 1; snprintf(note, sizeof note, "THIS ERASES THE HUNTER  PRESS X AGAIN"); }
-                else { char fp_[96]; slot_file(fp_, sizeof fp_, "save", "bin", cs); remove(fp_); slot_file(fp_, sizeof fp_, "lastpos", "txt", cs); remove(fp_); level = 2; sel = cs; conf = 0; snprintf(note, sizeof note, "HUNTER %d ERASED", cs + 1); }
+                else { char fp_[96]; slot_file(fp_, sizeof fp_, "save", "bin", cs); remove(fp_); slot_file(fp_, sizeof fp_, "lastpos", "txt", cs); remove(fp_); slot_file(fp_, sizeof fp_, "ladders", "txt", cs); remove(fp_); slot_file(fp_, sizeof fp_, "story", "txt", cs); remove(fp_); level = 2; sel = cs; conf = 0; snprintf(note, sizeof note, "HUNTER %d ERASED", cs + 1); }
             }
         }
         title_draw(items, n, sel, fade, note); vglSwapBuffers(GL_FALSE);
@@ -14688,6 +16451,10 @@ static int g_arr_i = -1; static float g_arr_d;          // the loader you just a
 static unsigned char ld_dis[MAX_LDRS];                 // door_box_off: doorways whose tint the player switched off from the System menu (the doorway itself still works) (kept in ux0:data/bbpsx/ldr_dis.txt as "map loader" lines)
 static void ldr_dis_load(void);
 static int ld_door[MAX_LDRS];                        // door-type loaders: the closed door standing in front of them (-1 = none): no map change until it is opened
+static int chapel_loader_(int i) { int rv_ = 0; const Link *lk_ = link_find(cur_map, ldrs[i].name, &rv_); return lk_ && !strcasecmp(cur_map, "gascoignearena") && !strcasecmp(rv_ ? lk_->fm : lk_->tm, "oedonchapel"); }
+static int chapel_gate_door(const Door *D) { if (strcasecmp(cur_map, "gascoignearena")) return 0; if (D->cy > 50.0f) return 1; int k = (int)(D - doors_); for (int i = 0; i < nLdrs; i++) if (ld_door[i] == k && chapel_loader_(i)) return 1; return 0; }
+static int chapel_ok_(void) { if (g_rush) return 0;      /* (boss rush: the chapel gate stays shut, whatever you hold) */
+    return (g_doors_free > 0) || (g_gb_dead && !g_gb_redo) || inv_have("LostHunterBadge"); }      /* chapel_ok: the way to the chapel is open only once Gilbert has fallen (his badge), or in the free-doors test mode: a saved "gate opened" bit alone is not trusted */
 static int ld_lad[MAX_LDRS], ld_up[MAX_LDRS];        // ladder-type loaders: which ladder they belong to, and whether it climbs up
 static float ld_best[MAX_LDRS], ld_bestdz[MAX_LDRS]; static int ld_in[MAX_LDRS];
 static const struct { const char *map, *loader; } LDR_OFF[] = { { "greatbonfire", "BP_LevelLoader6_2" } };      // loaders that must not work (ldr_off): the right-hand gate in the Great Bonfire
@@ -14733,6 +16500,7 @@ static int ldr_nearest(float px, float py) {              // the map-change door
 static int ldr_in_zone(int i, float px, float py, float pz, int ladder_now) {
     const Loader *L = &ldrs[i];
     if (ld_door[i] >= 0 && !doors_[ld_door[i]].open) return 0;      // a closed door in the way: nothing to walk through yet
+    if (!chapel_ok_() && chapel_loader_(i)) return 0;      /* chapel_locked: the way to the Oedon Chapel does not work until the gate has been opened with the Lost Hunter Badge (Gilbert), whatever state the gate was left in */
     float dx = px - L->box[0], dy = py - L->box[1], dz = (pz + 0.9f) - L->box[2], hd = sqrtf(dx * dx + dy * dy);
     if (L->type == 2) {
         if (ld_lad[i] >= 0 && ld_up[i]) {                                                                       // climbing up: fade near the top
@@ -14751,6 +16519,7 @@ static int ldr_in_zone(int i, float px, float py, float pz, int ladder_now) {
             float t = (dx * ux + dy * uy), perp = fabsf(dx * -uy + dy * ux);      // t: metres in front of the door (on the arrival side), perp: sideways from its middle
             { int ge_ = !strncasecmp(cur_map, "ge_", 3); float fr_ = ld_door[i] >= 0 ? LD_DOOR_CROSS : (ge_ ? 1.1f : LD_DOOR_FRONT), hw_ = ge_ ? 1.3f : LD_DOOR_HALFW;      // ge_snug: the estate's open doorways (Gilbert's room) need a deliberate step in
             { int rv2_ = 0; const Link *lk_ = link_find(cur_map, L->name, &rv2_); if (lk_ && !strncasecmp(cur_map, "de_", 3) && !strcasecmp(rv2_ ? lk_->fm : lk_->tm, "greatbridgeexterior")) { fr_ = 0.6f; hw_ = 0.8f; } }      // bridge_small: the way out to the Great Bridge from the estate's first floor was easy to walk into by accident
+            if (!strcasecmp(cur_map, "oedonchapel")) { fr_ = 0.6f; hw_ = 4.2f; }      /* oedon_zone: the chapel's way out is the dark panel across the stairs: the zone is the panel's width and only reaches it */
             return t > -0.8f && t < fr_ && perp < hw_; }      // a physical door: you only travel once you step into the doorway itself, not just because it opened while you stood near it
         }
         return 0;
@@ -14823,14 +16592,14 @@ static void panels_draw(const PS1Shader *sh, const float *pv) {      // the pane
 }
 
 static float fall_weight(void) {      // fall_weight: the hidden equip load: 0.7 with nothing carried up to 1.0 fully loaded; every weapon you own counts (equipped or not), plus the hat and garb you wear
-    static const float WW[12] = { 6, 9, 7, 0, 4, 2, 6, 8, 7, 3, 4, 11 };
-    float w = 0.0f; for (int i = 0; i < 12; i++) if (g_wown[i]) w += WW[i];
+    static const float WW[NWPN] = { 6, 9, 7, 0, 4, 2, 6, 8, 7, 3, 4, 11, 0, 0, 7, 9, 0 };
+    float w = 0.0f; for (int i = 0; i < NWPN; i++) if (g_wown[i]) w += WW[i];
     if (g_att[0] > 0) w += 2.0f; if (g_att[1] > 0) w += 6.0f;
     float load = w / 45.0f; if (load > 1.0f) load = 1.0f;
     return 0.7f + 0.3f * load;
 }
 
-static float g_dark = 0.4f;      /* dark_overlay: how much the 3D picture is dimmed (0 - 0.7), works with the lighting shader off; dark.txt */
+static float g_dark = 0.45f;      /* dark_overlay: how much the 3D picture is dimmed (0 - 0.7), works with the lighting shader off; dark.txt */
 static int g_dark_done = 0;      /* dark_overlay already drawn this frame (before the fire / glow pass, so lights are not dimmed) */
 static void dark_overlay(void) {
     float dk_ = g_dark * (1.0f - 0.85f * g_dream_day);
@@ -14885,11 +16654,60 @@ static void lowres_make(void) {      /* lowres_3d: make the small off-screen ima
     else { char t_[64]; snprintf(t_, sizeof t_, "3D at %dx%d, HUD at %dx%d", g_r3w, g_r3h, RES_W, RES_H); maplog("load: lowres %s%s", t_, ""); }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
+static int g_r3_user = 2, g_r3_auto = 0;      /* auto_res: g_r3_user = the resolution you picked (the one that is saved); g_r3_auto = the game has lowered it for now */
 static void lowres_step(int dir) {      /* the System menu row: step the 3D resolution, rebuild the off-screen image, remember it */
     int i = g_r3i + dir; if (i < 0) i = 4; if (i > 4) i = 0;
     glFinish(); glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(1, &g_fbo); glDeleteRenderbuffers(1, &g_fbo_depth); glDeleteTextures(1, &g_fbo_tex);
     g_r3i = i; g_r3w = LOWRES_W[i]; g_r3h = LOWRES_H[i]; lowres_make();
-    { FILE *rf_ = fopen("ux0:data/bbpsx/res3d.txt", "w"); if (rf_) { fprintf(rf_, "%d\n", i); fclose(rf_); } }
+    if (!g_r3_auto) { g_r3_user = i; FILE *rf_ = fopen("ux0:data/bbpsx/res3d.txt", "w"); if (rf_) { fprintf(rf_, "%d\n", i); fclose(rf_); } }
+}
+static void autores_tick(float dt, int paused, const char *map) {      /* auto_res: where the graphics chip is the limit (swap waits long and the game runs near 30 fps), the 3D image drops one step for the rest of the visit; the next map starts at your own choice again. Never below 400x226. autores_off.txt turns it off. */
+    static int off_ = -1; static char lm_[40]; static float t_, sum_; static int n_;
+    if (off_ < 0) off_ = file_exists_("ux0:data/bbpsx/autores_off.txt") ? 1 : 0;
+    if (off_ || !g_lowfb) return;
+    if (strcmp(lm_, map)) { snprintf(lm_, sizeof lm_, "%s", map); t_ = sum_ = 0.0f; n_ = 0; if (g_r3_auto && g_r3i != g_r3_user) { g_r3_auto = 1; lowres_step(g_r3_user - g_r3i); } g_r3_auto = 0; return; }
+    if (paused || dt > 0.1f) { t_ = sum_ = 0.0f; n_ = 0; return; }
+    t_ += dt; sum_ += dt; n_++;
+    if (t_ < 6.0f) return;
+    float avg_ = sum_ / (float)n_; t_ = sum_ = 0.0f; n_ = 0;
+    if (avg_ > 0.027f && g_r3i > 1 && g_r3i >= g_r3_user) { g_r3_auto = 1; lowres_step(-1); { char t_[96]; snprintf(t_, sizeof t_, "auto_res: %.0f fps, image now %d wide", 1.0f / avg_, LOWRES_W[g_r3i]); maplog("%s%s", t_, ""); } }
+}
+static int g_mb_lvl = 0, g_mb_bad = 0;      /* motion_blur: 0 off, 1..5 stronger (System menu, mblur.txt) */
+static unsigned g_mb_fbo[2], g_mb_tex[2], g_mb_out; static int g_mb_w, g_mb_h, g_mb_cur, g_mb_valid;
+static const char *MB_NAMES[6] = { "OFF", "LIGHT", "MEDIUM", "STRONG", "HEAVY", "EXTREME" };
+static void mb_free(void) { if (g_mb_w) { glBindFramebuffer(GL_FRAMEBUFFER, 0); glDeleteFramebuffers(2, g_mb_fbo); glDeleteTextures(2, g_mb_tex); } g_mb_w = g_mb_h = 0; g_mb_valid = 0; g_mb_out = 0; }
+static int mb_make(void) {      /* motion_blur: two colour-only images the size of the 3D picture; each frame is mixed with the last mixed one */
+    glGenTextures(2, g_mb_tex); glGenFramebuffers(2, g_mb_fbo);
+    for (int k = 0; k < 2; k++) {
+        glBindTexture(GL_TEXTURE_2D, g_mb_tex[k]); glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_r3w, g_r3h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindFramebuffer(GL_FRAMEBUFFER, g_mb_fbo[k]); glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_mb_tex[k], 0);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) { g_mb_w = 1; mb_free(); g_mb_bad = 1; maplog("motion blur: framebuffer incomplete, switched off%s%s", "", ""); return 0; }
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0); g_mb_w = g_r3w; g_mb_h = g_r3h; g_mb_valid = 0; return 1;
+}
+static void mb_step(int d) { g_mb_lvl = (g_mb_lvl + d + 6) % 6; FILE *f_ = fopen("ux0:data/bbpsx/mblur.txt", "w"); if (f_) { fprintf(f_, "%d\n", g_mb_lvl); fclose(f_); } }
+static void mb_apply(int reset) {      /* motion_blur: called once the 3D scene is drawn, before it goes to the screen. The picture shown is this frame mixed with the previous shown one (weight per level: 30 / 45 / 58 / 70 / 80 percent of the old picture); the HUD is drawn afterwards and stays sharp. A map change, fade or resolution change starts clean. */
+    static char lm_[40]; if (strcmp(lm_, cur_map)) { snprintf(lm_, sizeof lm_, "%s", cur_map); g_mb_valid = 0; }
+    g_mb_out = 0;
+    if (g_mb_lvl <= 0 || !g_lowfb || g_mb_bad) { g_mb_valid = 0; return; }
+    if (g_mb_w != g_r3w || g_mb_h != g_r3h) { mb_free(); if (!mb_make()) return; }
+    if (reset) g_mb_valid = 0;
+    static const float B_[6] = { 0.0f, 0.30f, 0.45f, 0.58f, 0.70f, 0.80f };
+    int dst = g_mb_valid ? (g_mb_cur ^ 1) : 0; float W_ = (float)g_r3w, H_ = (float)g_r3h;
+    glBindFramebuffer(GL_FRAMEBUFFER, g_mb_fbo[dst]); glViewport(0, 0, g_r3w, g_r3h);
+    glDisable(GL_DEPTH_TEST); glDisable(GL_FOG); glDisable(GL_ALPHA_TEST); glDisable(GL_BLEND); glEnable(GL_TEXTURE_2D);
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); glOrthof(0, W_, 0, H_, -1, 1);
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+    glBindBuffer(GL_ARRAY_BUFFER, 0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); glEnableClientState(GL_VERTEX_ARRAY); glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+    float v[8] = { 0, 0, W_, 0, 0, H_, W_, H_ }, uv[8] = { 0, 0, 1, 0, 0, 1, 1, 1 };
+    glVertexPointer(2, GL_FLOAT, 0, v); glTexCoordPointer(2, GL_FLOAT, 0, uv);
+    glBindTexture(GL_TEXTURE_2D, g_fbo_tex); glColor4f(1, 1, 1, 1); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    if (g_mb_valid) { glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glBindTexture(GL_TEXTURE_2D, g_mb_tex[g_mb_cur]); glColor4f(1, 1, 1, B_[g_mb_lvl]); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4); glDisable(GL_BLEND); }
+    glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
+    glColor4f(1, 1, 1, 1); glEnable(GL_DEPTH_TEST); glEnable(GL_FOG); glEnable(GL_ALPHA_TEST);
+    glBindFramebuffer(GL_FRAMEBUFFER, g_fbo); glViewport(0, 0, g_r3w, g_r3h);
+    g_mb_cur = dst; g_mb_valid = 1; g_mb_out = g_mb_tex[dst];
 }
 static void lowres_present(void) {      /* lowres_3d: the off-screen 3D image goes to the real screen, blocky (nearest) and full size, before the HUD is drawn */
     glBindFramebuffer(GL_FRAMEBUFFER, 0); glViewport(0, 0, RES_W, RES_H);
@@ -14897,20 +16715,21 @@ static void lowres_present(void) {      /* lowres_3d: the off-screen 3D image go
     glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); glOrthof(0, RES_W, RES_H, 0, -1, 1);
     glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
     glBindBuffer(GL_ARRAY_BUFFER, 0); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0); glEnableClientState(GL_VERTEX_ARRAY); glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-    glBindTexture(GL_TEXTURE_2D, g_fbo_tex); glColor4f(1, 1, 1, 1);
+    glBindTexture(GL_TEXTURE_2D, g_mb_out ? g_mb_out : g_fbo_tex); glColor4f(1, 1, 1, 1);
     float v0 = g_fb_flip ? 0.0f : 1.0f, v1 = 1.0f - v0;
     float v[8] = { 0, 0, (float)RES_W, 0, 0, (float)RES_H, (float)RES_W, (float)RES_H }, uv[8] = { 0, v0, 1, v0, 0, v1, 1, v1 };
     glVertexPointer(2, GL_FLOAT, 0, v); glTexCoordPointer(2, GL_FLOAT, 0, uv); glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW);
     glColor4f(1, 1, 1, 1); glEnable(GL_DEPTH_TEST); glEnable(GL_FOG); glEnable(GL_ALPHA_TEST);
+    g_mb_out = 0;
 }
 
 static int g_rst_conf;      // gfx_reset: the Reset row has been pressed once
 static void gfx_reset(void) {      // gfx_reset: every graphics setting back to the built-in default, and the saved files for them removed
-    static const char *F_[] = { "crt.txt", "light.txt", "light_off.txt", "light_amb.txt", "dark.txt", "fog_k.txt", "res3d.txt", NULL };
+    static const char *F_[] = { "crt.txt", "light.txt", "light_off.txt", "light_amb.txt", "dark.txt", "fog_k.txt", "res3d.txt", "fps.txt", "volume.txt", "mblur.txt", NULL };
     for (int i = 0; F_[i]; i++) { char p_[96]; snprintf(p_, sizeof p_, "ux0:data/bbpsx/%s", F_[i]); remove(p_); }
     { SceUID d_ = sceIoDopen("ux0:data/bbpsx"); if (d_ >= 0) { SceIoDirent e_; memset(&e_, 0, sizeof e_); while (sceIoDread(d_, &e_) > 0) { const char *n_ = e_.d_name; size_t l_ = strlen(n_); if (!strncasecmp(n_, "fog_", 4) && l_ > 8 && !strcasecmp(n_ + l_ - 4, ".txt")) { char p_[160]; snprintf(p_, sizeof p_, "ux0:data/bbpsx/%s", n_); remove(p_); } memset(&e_, 0, sizeof e_); } sceIoDclose(d_); } }      // the per-map fog distances
-    g_crt = 3; g_lit_user = 1; g_lit_amb = 0.4f; g_dark = 0.4f; g_fog_k = 1.0f; g_fog_on = 1; g_fog_user = 0.0f; g_fog_end = g_fog_map; glFogf(GL_FOG_END, FOGV_END);
+    g_crt = 3; g_lit_user = 1; g_lit_amb = 0.7f; g_dark = 0.45f; g_fps_cap = 60; g_mb_lvl = 0; vol_set(0, 30); vol_set(1, 20); vol_set(2, 30); g_fog_k = 1.0f; g_fog_on = 1; g_fog_def = 60.0f; g_fog_user = 60.0f; g_fog_map = 60.0f; g_fog_end = 60.0f; glFogf(GL_FOG_END, FOGV_END);
     if (g_lowfb && g_r3i != 2) { lowres_step(2 - g_r3i); remove("ux0:data/bbpsx/res3d.txt"); }
 }
 
@@ -15129,7 +16948,7 @@ static void intro_play(float *projM, const PS1Shader *ps, int use_ps1) {
     inlog("loop done %d %d", fr_, 0); music_boss(-1); music_free(); CUR = sv; g_in_chair = 0;
     { float n_ = g_near, f_ = 80.0f, t_ = n_ * tanf(35.0f * 3.14159265f / 180.0f), r_ = t_ * ((float)RES_W / (float)RES_H);
       glMatrixMode(GL_PROJECTION); glLoadIdentity(); glFrustum(-r_, r_, -t_, t_, n_, f_); frustum_mat(projM, -r_, r_, -t_, t_, n_, f_); glMatrixMode(GL_MODELVIEW); }
-    if (!g_crackdbg) { if (map_interior(cur_map)) glClearColor(0.0f, 0.0f, 0.0f, 1.0f); else glClearColor(0.07f, 0.06f, 0.09f, 1.0f); }      // the map's own background again
+    if (!g_crackdbg) { if (map_interior(cur_map)) glClearColor(0.0f, 0.0f, 0.0f, 1.0f); else if (rl_map()) glClearColor(0.66f, 0.70f, 0.76f, 1.0f); else if (moon_map()) glClearColor(0.20f, 0.15f, 0.29f, 1.0f); else if (rom_map()) glClearColor(0.17f, 0.21f, 0.27f, 1.0f); else glClearColor(0.07f, 0.06f, 0.09f, 1.0f); }      // the map's own background again
     if (rm_baked) batch_free();      // the game bakes the level itself once the world is running (doors, lifts and so on are set up by then)
     inlog("intro finished %d %d", 0, 0); maplog("gi_intro: played%s%s", "", "");
 }
@@ -15245,8 +17064,10 @@ int main(void) {
             if (ga && gb) boss_init();
             maplog("boss: gas.bin %s%s", ga ? "ok" : "missing", gb ? ", gasbeast.bin ok" : ", gasbeast.bin missing");
             CUR = &GILC; { int gl_ = load_hunter("ux0:data/bbpsx/gilb.bin") || load_hunter("app0:gilb.bin"); if (gl_) gb_init(); maplog("boss: gilb.bin %s%s", gl_ ? "ok" : "missing", ""); }      // gilbert_boss
-            CUR = &GEHC; { int gh_ = load_hunter("ux0:data/bbpsx/gehr.bin") || load_hunter("app0:gehr.bin"); if (gh_) gh_init(); maplog("boss: gehr.bin %s%s", gh_ ? "ok" : "missing", ""); }      // gehrman_boss
-            CUR = &CBC; { int cl = load_hunter("ux0:data/bbpsx/clericbeast.bin") || load_hunter("app0:clericbeast.bin"); if (cl) cb_init(); maplog("boss: clericbeast.bin %s%s", cl ? "ok" : "missing", ""); }
+            g_ml_now = file_exists_("ux0:data/bbpsx/moonlight_now.txt");
+            if (file_exists_("ux0:data/bbpsx/burial.txt")) { g_burial_test = 1; g_burial_now = file_exists_("ux0:data/bbpsx/burial_now.txt"); maplog("burial.txt: the Burial Blade is sold after Gehrman falls (weapon 14)%s%s", "", ""); }      /* burial_weapon: weapons.bin built with --burial carries it as its own weapon */
+    CUR = &GEHC; { int gh_ = load_hunter("ux0:data/bbpsx/gehr.bin") || load_hunter("app0:gehr.bin"); if (gh_) gh_init(); maplog("boss: gehr.bin %s%s", gh_ ? "ok" : "missing", ""); }      // gehrman_boss
+            CUR = &CBC; { g_amyg_on = 0; int cl = load_hunter("ux0:data/bbpsx/clericbeast.bin") || load_hunter("app0:clericbeast.bin"); /* lazy_boss: the Amygdala and the Moon Presence are loaded only in their own arenas (rom_assets) */ maplog("boss: moonp1.bin %s%s", g_moon_have ? "ok (moon arena)" : "missing", ""); CUR = &CBC; if (cl) cb_init(); maplog("boss: amyg.bin %s%s", g_amg_have ? "ok (Rom arena)" : "missing", "");      /* rom_arena: both models load; the arena picks one */ maplog("boss: clericbeast.bin %s%s", cl ? "ok" : "missing", ""); }
         }
         setup_enemies();
         if (ok) { mstate_restore(); mstate_restore_enemies(); }
@@ -15254,7 +17075,7 @@ int main(void) {
     CUR = &HUNT;
 
     glViewport(0, 0, RES_W, RES_H);
-    if (g_lowfb) { FILE *rf_ = fopen("ux0:data/bbpsx/res3d.txt", "r"); if (rf_) { int v_; if (fscanf(rf_, "%d", &v_) == 1 && v_ >= 0 && v_ < 5) { g_r3i = v_; g_r3w = LOWRES_W[v_]; g_r3h = LOWRES_H[v_]; } fclose(rf_); } lowres_make(); }      /* lowres_3d */
+    if (g_lowfb) { FILE *rf_ = fopen("ux0:data/bbpsx/res3d.txt", "r"); if (rf_) { int v_; if (fscanf(rf_, "%d", &v_) == 1 && v_ >= 0 && v_ < 5) { g_r3i = v_; g_r3_user = v_; g_r3w = LOWRES_W[v_]; g_r3h = LOWRES_H[v_]; } fclose(rf_); } lowres_make(); }      /* lowres_3d */
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
     glClearColor(0.07f, 0.06f, 0.09f, 1.0f);
@@ -15287,8 +17108,10 @@ int main(void) {
     int lit_ok = ps1o_ok && g_ps1_dith && lit_build(&ps1L, lit_u[0], ps1_vert_src_l, ps1_frag_src_dl) && lit_build(&ps1oL, lit_u[1], ps1_vert_src_l, ps1_frag_src_odl);
     { FILE *lf_ = fopen("ux0:data/bbpsx/light_off.txt", "rb"); if (lf_) { fclose(lf_); g_lit_user = 0; maplog("lighting: OFF (light_off.txt)%s%s", "", ""); } lf_ = fopen("ux0:data/bbpsx/light.txt", "r"); if (lf_) { int v_ = 1; if (fscanf(lf_, "%d", &v_) == 1) g_lit_user = v_ ? 1 : 0; fclose(lf_); } g_lit_okv = lit_ok; }
     { FILE *wf_ = fopen("ux0:data/bbpsx/wlg_face.txt", "r"); if (wf_) { float w_; if (fscanf(wf_, "%f", &w_) == 1) { g_wlg_face = w_; g_wlg_file = 1; } fclose(wf_); } }
+    { FILE *mf_ = fopen("ux0:data/bbpsx/mblur.txt", "r"); if (mf_) { int v_ = 0; if (fscanf(mf_, "%d", &v_) == 1 && v_ >= 0 && v_ <= 5) g_mb_lvl = v_; fclose(mf_); } }
+    { FILE *ff_ = fopen("ux0:data/bbpsx/fps.txt", "r"); if (ff_) { int v_ = 0; if (fscanf(ff_, "%d", &v_) == 1 && (v_ == 60 || v_ == 30 || v_ == 24)) g_fps_cap = v_; fclose(ff_); } }
     { float d_; FILE *df_ = fopen("ux0:data/bbpsx/dark.txt", "r"); if (df_) { if (fscanf(df_, "%f", &d_) == 1 && d_ >= 0.0f && d_ <= 0.7f) g_dark = d_; fclose(df_); } }
-    { float k_; FILE *kf_ = fopen("ux0:data/bbpsx/fog_k.txt", "r"); if (kf_) { if (fscanf(kf_, "%f", &k_) == 1 && k_ >= 0.3f && k_ <= 1.0f) g_fog_k = k_; fclose(kf_); } kf_ = fopen("ux0:data/bbpsx/stick_noy.txt", "r"); if (kf_) { int n_ = 0; if (fscanf(kf_, "%d", &n_) == 1) g_noy = n_ ? 1 : 0; fclose(kf_); } }
+    { float k_; FILE *kf_ = fopen("ux0:data/bbpsx/fog_k.txt", "r"); if (kf_) { if (fscanf(kf_, "%f", &k_) == 1 && k_ >= 0.3f && k_ <= 1.0f) g_fog_k = k_; fclose(kf_); } kf_ = fopen("ux0:data/bbpsx/fog_dist.txt", "r"); if (kf_) { float d_ = 0.0f; if (fscanf(kf_, "%f", &d_) == 1 && d_ >= 8.0f && d_ <= 150.0f) g_fog_def = d_; fclose(kf_); } kf_ = fopen("ux0:data/bbpsx/stick_noy.txt", "r"); if (kf_) { int n_ = 0; if (fscanf(kf_, "%d", &n_) == 1) g_noy = n_ ? 1 : 0; fclose(kf_); } }
     { float a_; FILE *lf_ = fopen("ux0:data/bbpsx/light_amb.txt", "r"); if (lf_) { if (fscanf(lf_, "%f", &a_) == 1 && a_ >= 0.3f && a_ <= 1.3f) g_lit_amb = a_; fclose(lf_); } lf_ = fopen("ux0:data/bbpsx/light_int.txt", "r"); if (lf_) { if (fscanf(lf_, "%f", &a_) == 1 && a_ >= 0.1f && a_ <= 3.0f) g_lit_int = a_; fclose(lf_); } }
     maplog("lighting shader: %s%s", lit_ok ? "on" : "off (the compiler refused it)", "");
     maplog("ps1 opaque fast path: %s%s", ps1o_ok ? "on" : "off", "");
@@ -15325,9 +17148,14 @@ int main(void) {
     int a_bom[4] = { hunter_ok ? hunter_anim_find("HunterBoM_R-LInit") : -1, hunter_ok ? hunter_anim_find("HunterBoM_L-R") : -1, hunter_ok ? hunter_anim_find("HunterBoM_R-L") : -1, hunter_ok ? hunter_anim_find("HunterBoM_R-LAlt") : -1 }, n_bom = 0, i_bom = 0;      // Blades of Mercy: the right blade swings, then the left, then the right again (make_bomanims.sh)
     { int t_[4]; for (int q = 0; q < 4; q++) if (a_bom[q] >= 0) t_[n_bom++] = a_bom[q]; for (int q = 0; q < n_bom; q++) a_bom[q] = t_[q]; }
     { char t_[80]; snprintf(t_, sizeof t_, "blades of mercy: %d swing animations found (hunter_anims.bin)", n_bom); maplog("%s%s", t_, ""); }
+    int a_walk2h = hunter_ok ? hunter_anim_pick("AxeTransWalkF", NULL) : -1, a_sprint2h = hunter_ok ? hunter_anim_pick("AxeTransSprint", NULL) : -1;      /* walk2h: the Hunter's own two-handed walk and sprint (the axe's opened form; the Burial Blade uses them too), from hunter_anims2.bin (make_heavyanims.sh) */
+    if (a_sprint2h >= 0) H.anim[a_sprint2h].loop = 1; if (a_walk2h >= 0) H.anim[a_walk2h].loop = 1;      /* never hold the last frame while moving */
     int a_idle2h = hunter_ok ? hunter_anim_pick("Idle2H", NULL) : -1, a_run2h = hunter_ok ? hunter_anim_pick("Run2H", NULL) : -1, a_2htr = hunter_ok ? hunter_anim_pick("2HTransform", NULL) : -1, a_2hspin = hunter_ok ? hunter_anim_pick("2HSpinAttack", NULL) : -1;
     int a_2hatk[3] = { hunter_ok ? hunter_anim_pick("2HSwingHori1", NULL) : -1, hunter_ok ? hunter_anim_pick("2HHeavyHori", NULL) : -1, hunter_ok ? hunter_anim_pick("2HStab1", NULL) : -1 }, n_2hatk = 0, i_2hatk = 0;
     { int t_[3]; for (int q = 0; q < 3; q++) if (a_2hatk[q] >= 0) t_[n_2hatk++] = a_2hatk[q]; for (int q = 0; q < n_2hatk; q++) a_2hatk[q] = t_[q]; }
+    int a_mlatk[5] = { hunter_ok ? hunter_anim_find("HunterAxeTrans_Slam") : -1, hunter_ok ? hunter_anim_pick("2HHeavyHori", NULL) : -1, hunter_ok ? hunter_anim_find("HunterAxeTrans_HeavySlam") : -1, hunter_ok ? hunter_anim_pick("2HSwingHori1", NULL) : -1, hunter_ok ? hunter_anim_pick("2HStab1", NULL) : -1 }, n_mlatk = 0, i_mlatk = 0;      int a_mlswp = a_mlatk[1]; static int g_ml_swp;      /* the horizontal swipe, and whether it has just been played forward (the next R plays it backwards) */
+    /* the opened Moonlight Sword's own attack list (the Axe and the Burial Blade keep the three above): the Hunter's two-handed slams, where his hands stay close together on the hilt so the left arm hardly has to move, and Gascoigne's heavy horizontal swing. Gascoigne's other swing and his stab were made for a weapon with the hands up to 1.3 m apart: the left shoulder had to swing 150 degrees to reach the hilt and popped into the torso. They are only used if ux0:data/bbpsx/moon_atk_all.txt exists, or if the slams are missing (hunter_anims2.bin not on the card) */
+    { int nmax_ = file_exists_("ux0:data/bbpsx/moon_atk_all.txt") ? 5 : 3; int t_[5]; for (int q = 0; q < nmax_; q++) if (a_mlatk[q] >= 0) t_[n_mlatk++] = a_mlatk[q]; if (n_mlatk == 0) for (int q = 3; q < 5; q++) if (a_mlatk[q] >= 0) t_[n_mlatk++] = a_mlatk[q]; for (int q = 0; q < n_mlatk; q++) a_mlatk[q] = t_[q]; }
     int a_run  = hunter_ok ? hunter_anim_find("Hunter_Run")  : -1;
     int a_walk   = hunter_ok ? hunter_anim_pick("WalkF", "Walk") : -1;
     int a_sprint = hunter_ok ? hunter_anim_pick("Sprint", NULL) : -1;
@@ -15351,7 +17179,7 @@ int main(void) {
     int lay_act = -1; float t_act = 0.0f, lay_w = 0.0f; static float lay_loco[(64 + 4) * 12];
     int hv_chg[N_HVY], hv_atk[N_HVY], chg_i = -1, chg_latch = 0; float chg_t = -1.0f, chg_hold = 0.0f, atk_mult = 1.0f;
     for (int q = 0; q < N_HVY; q++) { hv_chg[q] = HVY[q].chg && hunter_ok ? hunter_anim_find(HVY[q].chg) : -1; hv_atk[q] = hunter_ok ? hunter_anim_find(HVY[q].atk) : -1; }
-    int spin_on = 0, spin_left = 0, spin_latch = 0; float spin_hold = 0.0f; uint8_t spin_hit[MAX_ENEMIES]; memset(spin_hit, 0, sizeof spin_hit);
+    int spin_on = 0, spin_left = 0, spin_latch = 0; float spin_hold = 0.0f; uint8_t spin_hit[MAX_ENEMIES]; memset(spin_hit, 0, sizeof spin_hit); int spin_seg = 0;      /* spin_rot: which turn of the spin we are in (the hit list is cleared each turn) */
     float attack_t = -1.0f, attack_dur = 0.55f, hurt_t = -1.0f, hurt_dur = 0.5f;
     float dodge_t = -1.0f, dodge_dur = 0.8f, dodge_vx = 0.0f, dodge_vy = 0.0f, atk_vx = 0.0f, atk_vy = 0.0f;
     int dodge_anim = -1;
@@ -15414,6 +17242,7 @@ int main(void) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         if (dead_t >= 0.0f) { pad.buttons &= SCE_CTRL_START; pad.lx = pad.ly = pad.rx = pad.ry = 128; }      // dead: no control
         if (g_hd_wait && g_cut_t < 0.0f) { pad.buttons = 0; pad.lx = pad.ly = pad.rx = pad.ry = 128; }      // hd_wait: no control in the second before the Hunter's Dream intro
+        if (g_da_hold) { pad.buttons = 0; pad.lx = pad.ly = pad.rx = pad.ry = 128; }      // dream_amyg: you cannot move while he holds you
         if (g_cut_t >= 0.0f) { if (pad.buttons & SCE_CTRL_START) g_cut_t = 1000.0f; pad.buttons = 0; pad.lx = pad.ly = pad.rx = pad.ry = 128; }      // night_cut: no control during the cutscene, START skips it
         unsigned wm_real = pad.buttons; int wm_mask = 0;
         if (g_shop_ui || g_up_ui || g_lamp_ui || g_store_ui) {      // storage / shop_ui / up_ui / lamp_menu: the messengers' shop, the workbench and the lantern's menu (the world keeps running and you can still move)
@@ -15523,7 +17352,7 @@ int main(void) {
                 if (p0 & SCE_CTRL_CIRCLE) g_up_ui = 0;
             } else {
                 if ((p0 & SCE_CTRL_UP) && g_up_sel > 0) g_up_sel--;
-                int ow_[11]; int on_ = up_owned(ow_); if (g_up_sel >= on_) g_up_sel = on_ > 0 ? on_ - 1 : 0;
+                int ow_[13]; int on_ = up_owned(ow_); if (g_up_sel >= on_) g_up_sel = on_ > 0 ? on_ - 1 : 0;
                 if ((p0 & SCE_CTRL_DOWN) && g_up_sel < on_ - 1) g_up_sel++;
                 if ((p0 & SCE_CTRL_CROSS) && on_ > 0) {
                     int w = ow_[g_up_sel], lv = g_wlv[w];
@@ -15545,9 +17374,8 @@ int main(void) {
                 if (p0 & SCE_CTRL_CROSS) {      /* gh_ending: he answers first; the choice is carried out when his words are closed */
                     g_gh_post = g_gh_sel + 1; g_gh_ui = 0; g_dlg_n = 0; g_dlg_name = "Gehrman"; g_dlg_arena = 0;
                     if (g_gh_sel == 0) { g_dlg[g_dlg_n++] = "Farewell, my keen hunter. Fear the blood."; }
-                    else { g_dlg[g_dlg_n++] = "Dear oh dear. What was it? The hunt, the blood, or the horrible dream?"; g_dlg[g_dlg_n++] = "Oh, it doesn't matter. It always comes down to the hunter's helper to clean up after these sort of messes."; g_dlg[g_dlg_n++] = "Tonight, Gehrman joins the hunt..."; }
-                    for (int k = 0; k < g_dlg_n; k++) g_dlg_snd[k] = (g_gh_sel == 1 && k == 0) ? S_GH_5 : -1; g_dlg_cont = (g_gh_sel == 1); g_dlg_t = 0.0f;      /* if an old short gh_l5 is still on the Vita (7 s, only his first sentence), play the other two clips on their own pages instead of leaving the rest silent */
-                    if (g_gh_sel == 1 && g_snd_nv[S_GH_5] && g_snd[S_GH_5][0].n < 15 * 48000 && g_dlg_n >= 3) { g_dlg_snd[1] = S_GH_6; g_dlg_snd[2] = S_GH_7; g_dlg_cont = 0; }      // gehrman_voice: the three refusal lines (snd/gh_l5..7_1.wav); the farewell has no clip yet
+                    else { g_dlg[g_dlg_n++] = "Dear oh dear. What was it? The hunt, the blood, or the horrible dream?"; }      /* his refusal answer ends here (the other two lines are gone, and gh_l5 is cut to this sentence) */
+                    for (int k = 0; k < g_dlg_n; k++) g_dlg_snd[k] = (g_gh_sel == 1 && k == 0) ? S_GH_5 : -1; g_dlg_cont = 0; g_dlg_t = 0.0f;      /* if an old short gh_l5 is still on the Vita (7 s, only his first sentence), play the other two clips on their own pages instead of leaving the rest silent */
                     g_dlg_open = 1; g_dlg_i = 0; dlg_voice();
                 }
                 if (p0 & SCE_CTRL_CIRCLE) g_gh_ui = 0;
@@ -15574,8 +17402,15 @@ int main(void) {
                 if ((p0 & SCE_CTRL_DOWN) && g_doll_sel < 2) g_doll_sel++;
                 if (p0 & SCE_CTRL_CROSS) {
                     if (g_doll_sel == 0) { g_doll_ui = 0; g_doll_talk = 1; if (g_doll_who >= 0) npc_talk(g_doll_who); }
-                    else if (g_doll_sel == 1) { g_doll_ui = 2; g_doll_sel = 0; memset(g_doll_pend, 0, sizeof g_doll_pend); snd_play(S_LANTERN, 0.6f); }
-                    else g_doll_ui = 0;
+                    else if (g_doll_sel == 1) {      /* she says her two lines about the echoes (with their voice clips), then the channel screen opens when they are closed */
+                        g_doll_ui = 0; g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = g_doll_who; g_dlg_name = "The Doll"; memset(g_dlg_spk, 0, sizeof g_dlg_spk);
+                        g_dlg[g_dlg_n++] = "Honourable hunter, pursue the echoes of blood,"; g_dlg[g_dlg_n++] = "and I will channel them into your strength."; g_dlg_snd[0] = S_DL_3; g_dlg_snd[1] = S_DL_4;
+                        g_doll_post = 1; g_dlg_arena = 0; g_dlg_t = 0.0f; g_dlg_open = 1; g_dlg_i = 0; dlg_voice();
+                    }
+                    else {      /* she says goodbye (voiced, doll_16), and the menu closes */
+                        g_doll_ui = 0; g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = g_doll_who; g_dlg_name = "The Doll"; memset(g_dlg_spk, 0, sizeof g_dlg_spk);
+                        g_dlg[g_dlg_n++] = "Farewell, good hunter."; g_dlg_snd[0] = S_DL_16; g_doll_post = 0; g_dlg_arena = 0; g_dlg_t = 0.0f; g_dlg_open = 1; g_dlg_i = 0; dlg_voice();
+                    }
                 }
                 if (p0 & SCE_CTRL_CIRCLE) g_doll_ui = 0;
             } else {
@@ -15612,8 +17447,8 @@ int main(void) {
             else if (g_wm_mode && (p0 & SCE_CTRL_CROSS)) {      // boss_rush: the mode stone's menu
                 g_wm_open = 0;
                 if (g_wm_sel == 0) {
-                    if (g_rush) { g_rush = 0; g_rush_clr = -1.0f; say("BOSS RUSH ENDED"); }
-                    else { g_rush = 1; g_rush_i = 0; g_rush_time = 0.0f; g_rush_ask = 0.0f; g_rush_clr = -1.0f; g_rush_heal = 1; if (g_gas_dead) g_gas_redo = 1; if (g_cb_dead) g_cb_redo = 1; if (g_gb_dead) g_gb_redo = 1; snd_play(S_LANTERN, 1.0f); say("BOSS RUSH: PRESS X AT THE TOMBSTONE"); maplog("boss rush: started%s%s", "", ""); }
+                    if (g_rush) { g_rush = 0; g_rush_clr = -1.0f; rush_unsnap(); save_write(0); say("BOSS RUSH ENDED"); }
+                    else { rush_snap(); g_rush = 1; g_rush_i = 0; g_rush_time = 0.0f; g_rush_ask = 0.0f; g_rush_clr = -1.0f; g_rush_heal = 1; if (g_gas_dead) g_gas_redo = 1; if (g_cb_dead) g_cb_redo = 1; if (g_gb_dead) g_gb_redo = 1; snd_play(S_LANTERN, 1.0f); say("BOSS RUSH: PRESS X AT THE TOMBSTONE"); maplog("boss rush: started%s%s", "", ""); }
                 } else { snd_play(S_UIBAD, 0.8f); say("RANDOMIZER: COMING SOON"); }
             }
             else if ((p0 & SCE_CTRL_CROSS) && g_wm_n > 0 && fade_st == 0) {
@@ -15634,9 +17469,9 @@ int main(void) {
               snprintf(g_stat_l[k], 24, "INSIGHT"); snprintf(g_stat_v[k++], 40, "%d", g_insight);
               snprintf(g_stat_l[k], 24, "LOCATION"); snprintf(g_stat_v[k++], 40, "%s", cur_map); snprintf(g_stat_pos, sizeof g_stat_pos, "X: %.1f  Y: %.1f  Z: %.1f", pl.x, pl.y, pl.z);
               if (g_doors_free < 0) g_doors_free = file_exists_("ux0:data/bbpsx/free_doors.txt") ? 1 : 0;
-              snprintf(g_sys_txt[26], 32, ng_bosses() < 4 ? "NEW GAME PLUS  %d OF 4 BOSSES" : (g_ng_conf ? "NEW GAME PLUS  X AGAIN" : "NEW GAME PLUS  CYCLE %d"), ng_bosses() < 4 ? ng_bosses() : g_ng + 1); snprintf(g_sys_txt[0], 32, "RESUME"); snprintf(g_sys_txt[1], 32, "REST  REFILL AND RESPAWN"); snprintf(g_sys_txt[2], 32, "RETURN TO SPAWN");
+              snprintf(g_sys_txt[26], 32, ng_bosses() < 5 ? "NEW GAME PLUS  %d OF 5 BOSSES" : (g_ng_conf ? "NEW GAME PLUS  X AGAIN" : "NEW GAME PLUS  CYCLE %d"), ng_bosses() < 5 ? ng_bosses() : g_ng + 1); snprintf(g_sys_txt[0], 32, "RESUME"); snprintf(g_sys_txt[1], 32, "REST  REFILL AND RESPAWN"); snprintf(g_sys_txt[2], 32, "RETURN TO SPAWN");
               snprintf(g_sys_txt[3], 32, "NPC  RESET INTERACTIONS"); snprintf(g_sys_txt[4], 32, "NPC  NEXT STAGE (NOW %d)", g_gas_dead ? 2 : 1);
-              { static const char *N_[7] = { "WEREWOLF", "RABID DOG", "TROLL", "DOG RAT", "CROW DOG", "GIANT PIG", "WERE PIG" }; static const int T_[7] = { 5, 6, 7, 12, 14, 15, 16 }; snprintf(g_sys_txt[25], 32, "DEBUG SPAWN  %s%s  <>", N_[g_dbg_ty], en_have[T_[g_dbg_ty]] ? "" : " (NOT LOADED)"); } snprintf(g_sys_txt[31], 32, g_rst_conf ? "PRESS X AGAIN TO RESET" : "RESET GRAPHICS TO DEFAULT"); snprintf(g_sys_txt[30], 32, "DEBUG  MAP EDITOR  %s", g_te_on ? "ON" : "OFF"); snprintf(g_sys_txt[5], 32, "FREE DOORS  %s", g_doors_free ? "ON" : "OFF"); snprintf(g_sys_txt[6], 32, "VERTEX SNAP  %s", snap_on ? "ON" : "OFF"); snprintf(g_sys_txt[7], 32, "PS1 SHADER  %s", use_ps1 ? "ON" : "OFF"); snprintf(g_sys_txt[8], 32, "FOG  %s  DIST %d  <>", g_fog_on ? "ON" : "OFF", (int)(g_fog_end + 0.5f)); snprintf(g_sys_txt[9], 32, "DEBUG  BOSSES ALL ALIVE"); snprintf(g_sys_txt[10], 32, "DEBUG  BOSSES ALL DEAD"); snprintf(g_sys_txt[11], 32, "LEFT HANDED  %s", g_lefty ? "ON" : "OFF"); snprintf(g_sys_txt[12], 32, "DEBUG  FREE CAM  %s", flying ? "ON" : "OFF"); snprintf(g_sys_txt[13], 32, "DEBUG  DOOR TINT  %s", g_ldr_tint ? "ON" : "OFF"); { int ni_ = ldr_nearest(flying ? fly_x : pl.x, flying ? fly_y : pl.y); snprintf(g_sys_txt[14], 32, "DEBUG  NEAREST DOOR TINT  %s", ni_ < 0 ? "NONE" : (ld_dis[ni_] ? "OFF" : "ON")); } snprintf(g_sys_txt[15], 32, "DEBUG  PANEL EDITOR  %s", g_pe_on ? "ON" : "OFF"); snprintf(g_sys_txt[16], 32, "SCANLINES  %s", (g_crt & 1) ? "ON" : "OFF"); snprintf(g_sys_txt[18], 32, "CRT FILTER  %s", (g_crt & 2) ? "ON" : "OFF"); snprintf(g_sys_txt[19], 32, "LIGHTING  %s", !g_lit_okv ? "UNAVAILABLE" : (g_lit_user ? "ON" : "OFF")); snprintf(g_sys_txt[10], 32, "DEBUG  GEHRMAN FIGHT"); snprintf(g_sys_txt[17], 32, g_sys_conf ? "PRESS X AGAIN TO EXIT" : "EXIT TO MAIN MENU"); if (g_lowfb) snprintf(g_sys_txt[20], 32, "3D RESOLUTION  %dX%d  <>", g_r3w, g_r3h); else snprintf(g_sys_txt[20], 32, "3D RESOLUTION  SET PS1HUD"); if (g_lit_okv) snprintf(g_sys_txt[21], 32, "AMBIENT LIGHT  %d  <>", (int)(g_lit_amb * 100.0f + 0.5f)); else snprintf(g_sys_txt[21], 32, "AMBIENT LIGHT  UNAVAILABLE"); snprintf(g_sys_txt[22], 32, "FOG CLOSENESS  %d%%  <>", (int)(g_fog_k * 100.0f + 0.5f)); snprintf(g_sys_txt[24], 32, "DARKNESS  %d%%  <>", (int)(g_dark * 100.0f + 0.5f)); snprintf(g_sys_txt[27], 32, "SOUND VOLUME  %d%%  <>", g_vlm_pc[0]); snprintf(g_sys_txt[28], 32, "BACKGROUND VOLUME  %d%%  <>", g_vlm_pc[1]); snprintf(g_sys_txt[29], 32, "VOICE VOLUME  %d%%  <>", g_vlm_pc[2]); snprintf(g_sys_txt[23], 32, "RIGHT STICK Y  %s", g_noy ? "OFF" : "ON"); }
+              { static const char *N_[7] = { "WEREWOLF", "RABID DOG", "TROLL", "DOG RAT", "CROW DOG", "GIANT PIG", "WERE PIG" }; static const int T_[7] = { 5, 6, 7, 12, 14, 15, 16 }; snprintf(g_sys_txt[25], 32, "DEBUG SPAWN  %s%s  <>", N_[g_dbg_ty], en_have[T_[g_dbg_ty]] ? "" : " (NOT LOADED)"); } snprintf(g_sys_txt[31], 32, g_rst_conf ? "PRESS X AGAIN TO RESET" : "RESET GRAPHICS TO DEFAULT"); snprintf(g_sys_txt[30], 32, "DEBUG  MAP EDITOR  %s", g_te_on ? "ON" : "OFF"); snprintf(g_sys_txt[5], 32, "FREE DOORS  %s", g_doors_free ? "ON" : "OFF"); snprintf(g_sys_txt[6], 32, "VERTEX SNAP  %s", snap_on ? "ON" : "OFF"); snprintf(g_sys_txt[7], 32, "PS1 SHADER  %s", use_ps1 ? "ON" : "OFF"); snprintf(g_sys_txt[8], 32, "FOG  %s  DIST %d  <>", g_fog_on ? "ON" : "OFF", (int)(g_fog_end + 0.5f)); snprintf(g_sys_txt[9], 32, "DEBUG  BOSSES ALL ALIVE"); snprintf(g_sys_txt[10], 32, "DEBUG  BOSSES ALL DEAD"); snprintf(g_sys_txt[11], 32, "LEFT HANDED  %s", g_lefty ? "ON" : "OFF"); snprintf(g_sys_txt[12], 32, "DEBUG  FREE CAM  %s", flying ? "ON" : "OFF"); snprintf(g_sys_txt[13], 32, "DEBUG  DOOR TINT  %s", g_ldr_tint ? "ON" : "OFF"); { int ni_ = ldr_nearest(flying ? fly_x : pl.x, flying ? fly_y : pl.y); snprintf(g_sys_txt[14], 32, "DEBUG  NEAREST DOOR TINT  %s", ni_ < 0 ? "NONE" : (ld_dis[ni_] ? "OFF" : "ON")); } snprintf(g_sys_txt[15], 32, "DEBUG  PANEL EDITOR  %s", g_pe_on ? "ON" : "OFF"); snprintf(g_sys_txt[16], 32, "SCANLINES  %s", (g_crt & 1) ? "ON" : "OFF"); snprintf(g_sys_txt[18], 32, "CRT FILTER  %s", (g_crt & 2) ? "ON" : "OFF"); snprintf(g_sys_txt[19], 32, "LIGHTING  %s", !g_lit_okv ? "UNAVAILABLE" : (g_lit_user ? "ON" : "OFF")); snprintf(g_sys_txt[10], 32, "DEBUG  GEHRMAN FIGHT"); snprintf(g_sys_txt[17], 32, g_sys_conf ? "PRESS X AGAIN TO EXIT" : "EXIT TO MAIN MENU"); if (g_lowfb) snprintf(g_sys_txt[20], 32, "3D RESOLUTION  %dX%d  <>", g_r3w, g_r3h); else snprintf(g_sys_txt[20], 32, "3D RESOLUTION  SET PS1HUD"); if (g_lit_okv) snprintf(g_sys_txt[21], 32, "AMBIENT LIGHT  %d  <>", (int)(g_lit_amb * 100.0f + 0.5f)); else snprintf(g_sys_txt[21], 32, "AMBIENT LIGHT  UNAVAILABLE"); snprintf(g_sys_txt[22], 32, "FOG CLOSENESS  %d%%  <>", (int)(g_fog_k * 100.0f + 0.5f)); snprintf(g_sys_txt[24], 32, "DARKNESS  %d%%  <>", (int)(g_dark * 100.0f + 0.5f)); snprintf(g_sys_txt[27], 32, "SOUND VOLUME  %d%%  <>", g_vlm_pc[0]); snprintf(g_sys_txt[28], 32, "BACKGROUND VOLUME  %d%%  <>", g_vlm_pc[1]); snprintf(g_sys_txt[29], 32, "VOICE VOLUME  %d%%  <>", g_vlm_pc[2]); snprintf(g_sys_txt[23], 32, "RIGHT STICK Y  %s", g_noy ? "OFF" : "ON"); snprintf(g_sys_txt[32], 32, "FPS CAP  %d  <>", g_fps_cap); snprintf(g_sys_txt[33], 32, "MOTION BLUR  %s  <>", MB_NAMES[g_mb_lvl]); }
             if (p0 & SCE_CTRL_START) g_inv_open = 0;
             else if (g_mn_scr == 0) {
                 if ((p0 & SCE_CTRL_LEFT) && g_mn_col > 0) g_mn_col--;
@@ -15684,21 +17519,23 @@ int main(void) {
                 if (SYS_MAP[g_sys_sel] == 22 && (p0 & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) { float k_ = g_fog_k + ((p0 & SCE_CTRL_RIGHT) ? 0.1f : -0.1f); if (k_ < 0.3f) k_ = 0.3f; if (k_ > 1.0f) k_ = 1.0f; g_fog_k = k_; glFogf(GL_FOG_END, FOGV_END); FILE *kf_ = fopen("ux0:data/bbpsx/fog_k.txt", "w"); if (kf_) { fprintf(kf_, "%.2f\n", k_); fclose(kf_); } }
                 if (SYS_MAP[g_sys_sel] == 25 && (p0 & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) g_dbg_ty = (g_dbg_ty + ((p0 & SCE_CTRL_RIGHT) ? 1 : 6)) % 7;      // dbg_spawn
                 if (SYS_MAP[g_sys_sel] == 20 && g_lowfb && (p0 & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) lowres_step((p0 & SCE_CTRL_RIGHT) ? 1 : -1);
+                if (SYS_MAP[g_sys_sel] == 32 && (p0 & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) fps_cap_step((p0 & SCE_CTRL_RIGHT) ? 1 : -1);
+                if (SYS_MAP[g_sys_sel] == 33 && (p0 & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) mb_step((p0 & SCE_CTRL_RIGHT) ? 1 : -1);
                 if (SYS_MAP[g_sys_sel] == 8 && (p0 & (SCE_CTRL_LEFT | SCE_CTRL_RIGHT))) {      // fog_sky: the fog distance, 4 m at a time
-                    float d_ = g_fog_end + ((p0 & SCE_CTRL_RIGHT) ? 2.0f : -2.0f); if (d_ < 8.0f) d_ = 8.0f; if (d_ > 80.0f) d_ = 80.0f; g_fog_user = d_; g_fog_end = d_; glFogf(GL_FOG_END, FOGV_END); { char fp_[96]; snprintf(fp_, sizeof fp_, "ux0:data/bbpsx/fog_%s.txt", cur_map); FILE *ff_ = fopen(fp_, "w"); if (ff_) { fprintf(ff_, "%.0f\n", d_); fclose(ff_); } }      // fog_cfg: saved per map
+                    float d_ = g_fog_end + ((p0 & SCE_CTRL_RIGHT) ? 2.0f : -2.0f); if (d_ < 8.0f) d_ = 8.0f; if (d_ > 150.0f) d_ = 150.0f; g_fog_user = g_fog_def = d_; g_fog_end = d_; glFogf(GL_FOG_END, FOGV_END); { FILE *ff_ = fopen("ux0:data/bbpsx/fog_dist.txt", "w"); if (ff_) { fprintf(ff_, "%.0f\n", d_); fclose(ff_); } }      /* fog_one: one distance for all maps */
                 }
                 if (p0 & SCE_CTRL_CROSS) {
                     if (SYS_MAP[g_sys_sel] == 0) g_inv_open = 0;
                     else if (SYS_MAP[g_sys_sel] == 1) { g_menu_rest = 1; g_inv_open = 0; snd_play(S_LANTERN, 0.8f); }
                     else if (SYS_MAP[g_sys_sel] == 2) { g_menu_spawn = 1; g_inv_open = 0; }
                     else if (SYS_MAP[g_sys_sel] == 3) {      // npc_debug: forget every NPC conversation (Eileen met, the arena scene, the Crow Hunter Badge)
-                        g_eileen_met = 0; g_eileen_rep = 0; g_arena_done = 0; g_dlg_open = 0; g_eil_state = 0; g_gil_gone = 0;
+                        g_eileen_met = 0; g_eileen_rep = 0; g_arena_done = 0; g_dlg_open = 0; g_eil_state = 0; g_hk_hp = g_hk_eh = 0.0f; memset(g_hk_pos, 0, sizeof g_hk_pos); g_gil_gone = 0;
                         for (int i = 0; i < MAX_INV; i++) if (g_inv[i].n > 0 && !strcasecmp(g_inv[i].key, "CrowHunterBadge")) g_inv[i].n = 0;
                         if (!strcasecmp(cur_map, "gascoignearena") && en_ok) { lock_idx = -1; setup_enemies(); }
                         say("NPC INTERACTIONS RESET");
                     }
                     else if (SYS_MAP[g_sys_sel] == 4) {      // npc_debug: step the story on, and go where the NPCs are for that stage (1 = Drydock, 2 = Gascoigne dead: Henryk and Eileen in the arena)
-                        g_inv_open = 0; g_arena_done = 0; g_dlg_open = 0; g_eil_state = 0;
+                        g_inv_open = 0; g_arena_done = 0; g_dlg_open = 0; g_eil_state = 0; g_hk_hp = g_hk_eh = 0.0f; memset(g_hk_pos, 0, sizeof g_hk_pos);
                         if (!g_gas_dead) { g_gas_dead = 1; snprintf(pend_map, sizeof pend_map, "gascoignearena"); say("NPC STAGE 2: ARENA"); }
                         else { g_gas_dead = 0; snprintf(pend_map, sizeof pend_map, "drydock"); say("NPC STAGE 1: DRYDOCK"); }
                         pend_ld[0] = 0; pend_lamp = 0; if (fade_st == 0) fade_st = 1;
@@ -15706,13 +17543,13 @@ int main(void) {
                     else if (SYS_MAP[g_sys_sel] == 5) { g_doors_free = g_doors_free ? 0 : 1; }
                     else if (SYS_MAP[g_sys_sel] == 6) { g_menu_snap = 1; }
                     else if (SYS_MAP[g_sys_sel] == 7) { g_menu_ps1 = 1; }
-                    else if (SYS_MAP[g_sys_sel] == 8) { g_fog_on = !g_fog_on; g_fog_end = g_fog_user > 0.0f ? g_fog_user : (!g_fog_on ? 80.0f : g_fog_map); glFogf(GL_FOG_END, FOGV_END); }      // fog_sky
+                    else if (SYS_MAP[g_sys_sel] == 8) { g_fog_on = !g_fog_on; g_fog_end = g_fog_user > 0.0f ? g_fog_user : (!g_fog_on ? 100.0f : g_fog_map); glFogf(GL_FOG_END, FOGV_END); }      // fog_sky
                     else if (SYS_MAP[g_sys_sel] == 9) {      // debug_bosses: Gascoigne, Cleric Beast and Gilbert all come back (Gehrman too, if he was killed)
                         if (g_gas_dead) g_gas_redo = 1; if (g_cb_dead) g_cb_redo = 1; if (g_gb_dead) g_gb_redo = 1; if (g_gh_dead) g_gh_redo = 1;
                         mstate_forget_kills(); save_write(0); lamps_gate(); lock_idx = -1; setup_enemies(); say("ALL BOSSES RETURN"); maplog("debug: all bosses alive%s%s", "", "");
                     }
                     else if (SYS_MAP[g_sys_sel] == 10) {      // debug_bosses: the three are dead and Gehrman is ready to be fought (walk into the Hunter's Dream)
-                        g_gas_dead = 1; g_gas_redo = 0; g_cb_dead = 1; g_cb_redo = 0; g_gb_dead = 1; g_gb_redo = 0; g_gh_dead = 0; g_gh_redo = 0;
+                        g_gas_dead = 1; g_gas_redo = 0; g_cb_dead = 1; g_cb_redo = 0; g_gb_dead = 1; g_gb_redo = 0; g_gh_dead = 0; g_gh_redo = 0; g_story |= 15; story_save();
                         mstate_forget_kills(); save_write(0); lamps_gate(); lock_idx = -1; setup_enemies(); say("ALL BOSSES SLAIN  GEHRMAN AWAITS"); maplog("debug: all bosses dead%s%s", "", "");
                         g_inv_open = 0; if (strcasecmp(cur_map, "huntersdream") && fade_st == 0 && file_exists_("ux0:data/bbpsx/level_huntersdream.bin")) { snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; }      // gehrman_debug: straight to the Dream, where the house burns and he waits
                     }
@@ -15725,6 +17562,11 @@ int main(void) {
                     }
                     else if (SYS_MAP[g_sys_sel] == 13) { g_ldr_tint = !g_ldr_tint; say(g_ldr_tint ? "DOOR TINT ON" : "DOOR TINT OFF"); }
                     else if (SYS_MAP[g_sys_sel] == 14) { int ni_ = ldr_nearest(flying ? fly_x : pl.x, flying ? fly_y : pl.y); if (ni_ >= 0) { ld_dis[ni_] = !ld_dis[ni_]; ldr_dis_save(); char t_[64]; snprintf(t_, sizeof t_, "%s %s", ldrs[ni_].name, ld_dis[ni_] ? "OFF" : "ON"); say(t_); } }
+                    else if (SYS_MAP[g_sys_sel] == 15) {      /* panel_editor: on = free cam + the panel controls */
+                        g_pe_on = !g_pe_on; if (g_pe_on) { g_te_on = 0; if (!flying) { flying = 1; fly_x = pl.x; fly_y = pl.y; fly_z = pl.z + PL_EYE; } }
+                        else if (flying) { flying = 0; pl.x = fly_x; pl.y = fly_y; pl.z = fly_z - PL_EYE; pl.vz = 0; pl.grounded = 0; }
+                        g_inv_open = 0; say(g_pe_on ? "PANEL EDITOR ON" : "PANEL EDITOR OFF");
+                    }
                     else if (SYS_MAP[g_sys_sel] == 30) {      // texture_editor: on = free cam + the pick / flick controls
                         g_te_on = !g_te_on; if (g_te_on) { g_pe_on = 0; g_te_nl = 0; if (!flying) { flying = 1; fly_x = pl.x; fly_y = pl.y; fly_z = pl.z + PL_EYE; } }
                         else if (flying) { flying = 0; pl.x = fly_x; pl.y = fly_y; pl.z = fly_z - PL_EYE; pl.vz = 0; pl.grounded = 0; }      // switching the editor off also leaves the free cam
@@ -15741,8 +17583,10 @@ int main(void) {
                     else if (SYS_MAP[g_sys_sel] == 19) { if (g_lit_okv) { g_lit_user = !g_lit_user; FILE *lf_ = fopen("ux0:data/bbpsx/light.txt", "w"); if (lf_) { fprintf(lf_, "%d\n", g_lit_user); fclose(lf_); } say(g_lit_user ? "LIGHTING ON" : "LIGHTING OFF"); } else say("LIGHTING UNAVAILABLE"); }      // light_toggle: saved in light.txt
                     else if (SYS_MAP[g_sys_sel] == 18) { g_crt ^= 2; FILE *cf_ = fopen("ux0:data/bbpsx/crt.txt", "w"); if (cf_) { fprintf(cf_, "%d\n", g_crt); fclose(cf_); } say((g_crt & 2) ? "CRT FILTER ON" : "CRT FILTER OFF"); }      // bit 2: vignette + rolling band
                     else if (SYS_MAP[g_sys_sel] == 20) { if (g_lowfb) lowres_step(1); }
+                    else if (SYS_MAP[g_sys_sel] == 32) fps_cap_step(1);
+                    else if (SYS_MAP[g_sys_sel] == 33) mb_step(1);
                     else if (SYS_MAP[g_sys_sel] == 26) {      // ngplus: start the next cycle - the world starts over, you keep everything you are and carry
-                        if (ng_bosses() < 4) { say("DEFEAT ALL FOUR BOSSES FIRST"); }
+                        if (ng_bosses() < 5) { say("DEFEAT ALL FIVE BOSSES FIRST"); }
                         else if (!g_ng_conf) { g_ng_conf = 1; say("PRESS X AGAIN TO BEGIN NEW GAME PLUS"); }
                         else {
                             g_ng_conf = 0; g_ngp_go = 1; }
@@ -15758,11 +17602,14 @@ int main(void) {
             quick_ready(); g_inv_open = 1; g_mn_scr = 0; g_mn_row = 0; g_mn_col = 0; g_mn_assign = -1; g_sys_conf = 0;
         }
         if (dead_t >= 0.0f || fade_st != 0) g_inv_open = 0;
+        static unsigned ui_eat_ = 0; unsigned ui_old_ = ui_eat_;      /* ui_eat: a button held while a menu or box was open stays dead after it closes until it is let go (R1 tab switching must not swing, Circle closing must not roll) */
+        if (wm_mask) ui_eat_ = wm_real & ~SCE_CTRL_START; else if (ui_eat_) ui_eat_ &= pad.buttons;
+        if (!wm_mask && ui_eat_) pad.buttons &= ~ui_eat_;
         if (g_ngp_go && fade_st == 0 && dead_t < 0.0f) { g_ngp_go = 0;      // ngplus: from the SYSTEM menu or the title screen
                             g_ng_conf = 0; g_ng++; g_ng_wipe = 1; memset(mstate, 0, sizeof mstate);
                             g_lad_ndone = 0; { char lp_[96]; slot_file(lp_, sizeof lp_, "ladders", "txt", g_slot); FILE *lf_ = fopen(lp_, "w"); if (lf_) fclose(lf_); }      // ladders lowered, gates and switches thrown: all back as they were
                             for (int ik_ = 0; ik_ < MAX_INV; ik_++) { if (g_inv[ik_].cat == 3 && strcmp(g_inv[ik_].key, "CrowHunterBadge")) g_inv[ik_].n = 0; if (g_istore[ik_].cat == 3 && strcmp(g_istore[ik_].key, "CrowHunterBadge")) g_istore[ik_].n = 0; }      // keys are not kept: every door is locked again (the Crow Hunter Badge is the one thing that stays)
-                            g_hfire = 0; g_nhf = -1; g_gas_dead = g_cb_dead = g_gb_dead = g_gh_dead = 0; g_gas_redo = g_cb_redo = g_gb_redo = g_gh_redo = 0; g_eil_state = 0; g_arena_done = 0; g_eileen_met = 0; g_sick_open = 0; g_gil_gone = 0; g_dream_seen = 0; g_hd_done = 0; g_mbox_used = 0;      /* hd_done = 0: the Hunter's Dream wake-up plays again on the first visit of every new game plus */
+                            g_story = 0; story_save(); g_rom_seen = 0; g_rom_seen_s = 0; g_hfire = 0; g_nhf = -1; g_gas_dead = g_cb_dead = g_gb_dead = g_gh_dead = 0; g_gas_redo = g_cb_redo = g_gb_redo = g_gh_redo = 0; amg_dead_set(0); g_amg_rez = 0; g_eil_state = 0; g_hk_hp = g_hk_eh = 0.0f; memset(g_hk_pos, 0, sizeof g_hk_pos); g_arena_done = 0; g_eileen_met = 0; g_sick_open = 0; g_gil_gone = 0; g_dream_seen = 0; g_hd_done = 0; g_mbox_used = 0;      /* hd_done = 0: the Hunter's Dream wake-up plays again on the first visit of every new game plus */
                             memset(g_lit_map, 0, sizeof g_lit_map); g_lit_n = 0; g_lamp_set = 0; g_lp_set = 0; g_drop.active = 0; g_pois_t = 0.0f; g_pois_build = 0.0f;
                             hp = HP_MAX; stam = STAM_MAX; vials = VIALS_MAX; bullets = BULLETS_MAX; g_cur_vials = vials; g_cur_bullets = bullets;
                             save_write(0); g_inv_open = 0;
@@ -15773,9 +17620,12 @@ int main(void) {
         int use_vial_ = g_inv_use_vial; if (use_vial_) { pressed |= SCE_CTRL_TRIANGLE; g_inv_use_vial = 0; }
         (void)use_vial_;                                                                                                       // TRIANGLE always drinks a blood vial: the vials are permanently equipped, the quick item below them is cycled with D-pad up
         if (g_menu_quit) break;
-        unsigned rel_ = prev_buttons & ~pad.buttons;      // l1_release: the pistol fires when L1 is let go, never while it is held
+        if (!g_rush) { int u_ = g_shop_unl | (g_gas_dead && !g_gas_redo ? 1 : 0) | (g_cb_dead && !g_cb_redo ? 2 : 0) | ((g_story & 2) ? 4 : 0); { static int all_ = -1; if (all_ < 0) all_ = file_exists_("ux0:data/bbpsx/shop_unlock_all.txt") ? 1 : 0; if (all_) u_ |= 7; }      /* (shop_unlock_all.txt on the card: the messengers sell everything the boss kills open up, whatever this run has killed so far) */
+          if (u_ != g_shop_unl) g_shop_unl = u_; }      /* shop_unlocks: remembered for good, so new game plus keeps the messengers' stock */
+        if (g_gb_dead && !g_gb_redo && !g_rush && !(g_story & 64) && dead_t < 0.0f && fade_st == 0) { g_story |= 1 | 64; story_save(); if (!inv_have("LostHunterBadge")) inv_add("LostHunterBadge", "LOST HUNTER BADGE", 3, 1); say("Received the Lost Hunter Badge"); snd_play(S_PICKUP, 1.0f); maplog("story: Gilbert is dead - badge given%s%s", "", ""); }      /* lost_badge: Gilbert's death gives it */
+        unsigned rel_ = prev_buttons & ~pad.buttons; rel_ &= ~ui_old_;      // l1_release: the pistol fires when L1 is let go, never while it is held
         static int l1_armed_ = 0; if (pressed & SCE_CTRL_LTRIGGER) l1_armed_ = (dead_t < 0.0f && !g_inv_open && fade_st == 0 && !flying); int l1_up_ = (rel_ & SCE_CTRL_LTRIGGER) && l1_armed_; if (rel_ & SCE_CTRL_LTRIGGER) l1_armed_ = 0;
-        int can_gun_ = hunter_ok && !flying && dead_t < 0.0f && !g_inv_open && wpn_lgun() && wpn_l() != 8 && !(wpn_r() == 1 && cl_open);
+        int can_gun_ = hunter_ok && !flying && dead_t < 0.0f && !g_inv_open && wpn_lgun() && wpn_l() != 8 && !(w2h_open_);
         static int aim_cancel_ = 0; if (!(pad.buttons & SCE_CTRL_LTRIGGER)) { if (aim_cancel_ && l1_up_) l1_up_ = 0; aim_cancel_ = 0; }      // aim_cancel: X while aiming drops the aim and the coming L1 release fires nothing
         if (can_gun_ && (pad.buttons & SCE_CTRL_LTRIGGER) && (pad.buttons & SCE_CTRL_SQUARE) && !aim_cancel_ && (pressed & SCE_CTRL_CROSS)) aim_cancel_ = 1;
         int gun_press = l1_up_ && can_gun_;      // the extended axe is two-handed: no firearm                 // L1: fire the pistol (on release)
@@ -15785,11 +17635,15 @@ int main(void) {
           if (g_mono) pressed &= ~(SCE_CTRL_RTRIGGER | SCE_CTRL_CIRCLE | SCE_CTRL_TRIANGLE | SCE_CTRL_SQUARE);      // monocular: shooting only
           g_aim = hold_ || g_mono || (g_aim && (gun_press || gun_t >= 0.0f)); }      // the extended axe is two-handed: no firearm                 // L1: fire the pistol
         prev_buttons = wm_mask ? wm_real : pad.buttons;
+        if (ui_eat_ && !wm_mask) prev_buttons &= ~ui_eat_;
 
         uint64_t now = sceKernelGetProcessTimeWide();
         float dt = (now - last) / 1000000.0f;
         uint64_t prof_f0 = now;
         g_frame_ctr++;
+        { static int pos_ = -1; static float pt_ = 0.0f, lx_ = 1.0e9f, ly_ = 1.0e9f; if (pos_ < 0) pos_ = file_exists_("ux0:data/bbpsx/pos_on.txt") ? 1 : 0;      /* pos_on.txt: the maplog gets "pos: map x y z yaw" about once a second while you move (to find where a gate or a spot is) */
+          if (pos_) { pt_ += dt; if (pt_ >= 1.0f) { pt_ = 0.0f; if (hypotf(pl.x - lx_, pl.y - ly_) > 0.5f) { lx_ = pl.x; ly_ = pl.y; char t_[120]; snprintf(t_, sizeof t_, "pos: %s %.2f %.2f %.2f yaw %.0f", cur_map, pl.x, pl.y, pl.z, face * 57.2958f); maplog("%s%s", t_, ""); } } } }
+        if (da_update(dt, &pl, fade_st != 0 || dead_t >= 0.0f || g_dlg_open || g_shop_ui || g_up_ui || g_lamp_ui || g_store_ui || g_inv_open || g_wm_open || flying, face) && fade_st == 0) { snprintf(pend_map, sizeof pend_map, "romarena"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; maplog("dream_amyg: carried to the arena%s%s", "", ""); }      // dream_amyg: he lifts you; fade to black and on to Byrgenwerth
         {   // CIRCLE: tap (released before 0.6 s) = roll / quickstep, hold 0.6 s = sprint
             if (pad.buttons & SCE_CTRL_CIRCLE) { circ_hold += dt; circ_tap = 0; }
             else { circ_tap = (circ_hold > 0.0f && circ_hold < 0.6f && !circ_eat); circ_hold = 0.0f; circ_eat = 0; }
@@ -15797,6 +17651,7 @@ int main(void) {
         last = now;
         if (dt > 0.05f) dt = 0.05f;               // avoid huge steps after a hitch
         if (dt < 0.0005f) dt = 0.0005f;
+        if (g_slow_t > 0.0f) { g_slow_t -= dt; dt *= g_slow_k; if (dt < 0.0005f) dt = 0.0005f; if (g_slow_t <= 0.0f) g_slow_k = 1.0f; }      /* boss_cine: slow motion */
         if (g_cut_t >= 0.0f) { g_cut_t += dt; if (g_cut_gas) { static int lg_ = -1; if ((int)(g_cut_t / 4.0f) != lg_) { lg_ = (int)(g_cut_t / 4.0f); GILOG("gi: t %.1f", g_cut_t); } } if (g_cut_t >= (g_cut_gas ? GI_LEN : (g_cut_hd ? 29.07f : 14.7f))) cut_end(); }      // night_cut
         {       // night_cut: cut_test.txt on the Vita plays the cutscene 3 s after you arrive in the arena (to look at it without killing Gascoigne again)
             static int tf_ = -1, armed_; static float tm_; static char cm_[40];
@@ -15815,11 +17670,29 @@ int main(void) {
                 }
             }
         }
+        if (rom_map() && !moon_map() && !rl_map() && !g_rush && (!g_rom_seen || !g_rom_seen_s) && fade_st == 0) { g_rom_seen = 1; g_rom_seen_s = 1; maplog("rom_seen: the Byrgenwerth arena is now on the travel list%s%s", "", ""); }
+        {   // gehr_test: with ux0:data/bbpsx/gehr_test.txt on the card, each launch skips the game: Gascoigne, the Cleric Beast and Gilbert count as dead (nothing is saved), you go to the Dream and stand 2.4 m from Gehrman. Talk to him and choose to fight.
+            static int gt_ = -1, gs_ = 0; if (gt_ < 0) gt_ = file_exists_("ux0:data/bbpsx/gehr_test.txt") ? 1 : 0;
+            if (gt_ && gs_ < 3 && dead_t < 0.0f && cur_map[0] && g_frame_ctr > 240) {
+                if (gs_ == 0 && fade_st == 0) {
+                    g_gas_dead = 1; g_gas_redo = 0; g_cb_dead = 1; g_cb_redo = 0; g_gb_dead = 1; g_gb_redo = 0; g_gh_dead = 0; g_gh_redo = 0; g_story |= 15; story_save(); mstate_forget_kills(); lamps_gate(); lock_idx = -1;
+                    if (!strcasecmp(cur_map, "huntersdream")) { setup_enemies(); gs_ = 2; }
+                    else if (file_exists_("ux0:data/bbpsx/level_huntersdream.bin")) { snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; gs_ = 1; }
+                    else gs_ = 3;
+                } else if (gs_ == 1 && fade_st == 0 && !strcasecmp(cur_map, "huntersdream")) gs_ = 2;
+                if (gs_ == 2) {
+                    for (int k_ = 0; k_ < 8; k_++) { float a_ = k_ * 0.7854f, tx_ = GH_X + cosf(a_) * 2.4f, ty_ = GH_Y + sinf(a_) * 2.4f, fz_; if (!cw_floor(&world, tx_, ty_, GH_Z + 1.5f, &fz_) || fabsf(fz_ - GH_Z) > 0.5f) continue;
+                        float o_[3] = { GH_X, GH_Y, GH_Z + 1.0f }, v_[3] = { cosf(a_), sinf(a_), 0.0f }, th_; if (cw_raycast(&world, o_, v_, 2.4f, &th_)) continue;
+                        pl.x = tx_; pl.y = ty_; pl.z = fz_; pl.vz = 0.0f; face = atan2f(GH_Y - ty_, GH_X - tx_); break; }
+                    maplog("gehr_test: at Gehrman%s%s", "", ""); gs_ = 3;
+                }
+            }
+        }
         { static float up_t_ = -1.0f; if (up_t_ > 0.0f) { up_t_ -= dt; if (up_t_ <= 0.0f) { up_t_ = -1.0f; if (g_quick_mono()) { if (hunter_ok && !flying && dead_t < 0.0f) { g_mono = !g_mono; if (g_mono) lock_idx = -1; say(g_mono ? "MONOCULAR" : "MONOCULAR OFF"); } } else g_quick_use = 1; } }
           if ((pressed & SCE_CTRL_UP) && dead_t < 0.0f && !flying) { if (up_t_ > 0.0f) { if (g_mono) { g_mono = 0; say("MONOCULAR OFF"); } quick_cycle(); up_t_ = -1.0f; say(g_quick[g_quick_sel][0] ? g_quick[g_quick_sel] : "NO QUICK ITEM"); } else up_t_ = 0.3f; pressed &= ~SCE_CTRL_UP; } }      // D-pad up: tap = use the quick item (after 0.3 s; the Monocular = its first-person aim), tap twice = next quick item
         if (g_menu_rest) { pressed |= SCE_CTRL_UP; g_menu_rest = 0; }                                                          // the System menu's REST does what D-pad up used to
         GIF("world_updated");
-        g_plx = pl.x; g_ply = pl.y; g_plz = pl.z; g_plface = face; amb_update(dt, pl.x, pl.y, pl.z, dead_t >= 0.0f); blood_update(dt); fire_update(dt); house_fire_update(dt); trail_update(dt); thr_update(dt); brk_update(dt); att_migrate(); if (g_drop_bul > 0 || g_drop_vial > 0) { char t_[48]; t_[0] = 0; if (g_drop_bul > 0) { BUL_ADD(g_drop_bul); snprintf(t_, sizeof t_, "QUICKSILVER BULLET X%d", g_drop_bul); snd_play(S_BULLET, 0.9f); } if (g_drop_vial > 0) { vials += g_drop_vial; if (vials > VIALS_MAX) vials = VIALS_MAX; snprintf(t_, sizeof t_, "BLOOD VIAL X%d", g_drop_vial); snd_play(S_PICKUP, 0.9f); } g_drop_bul = g_drop_vial = 0; say(t_); } g_cur_vials = vials; g_cur_bullets = bullets; blood_gush_update(dt); if (g_shake > 0.0f) { g_shake -= dt * 2.4f; if (g_shake < 0.0f) g_shake = 0.0f; }
+        g_plx = pl.x; g_ply = pl.y; g_plz = pl.z; g_plface = face; amb_update(dt, pl.x, pl.y, pl.z, dead_t >= 0.0f); snd_pend_flush(); if (g_audio_fx) snd_place_update(dt, pl.x, pl.y, pl.z); blood_update(dt); fire_update(dt); house_fire_update(dt); trail_update(dt); thr_update(dt); brk_update(dt); att_migrate(); if (g_drop_bul > 0 || g_drop_vial > 0) { char t_[48]; t_[0] = 0; if (g_drop_bul > 0) { BUL_ADD(g_drop_bul); snprintf(t_, sizeof t_, "QUICKSILVER BULLET X%d", g_drop_bul); snd_play(S_BULLET, 0.9f); } if (g_drop_vial > 0) { vials += g_drop_vial; if (vials > VIALS_MAX) vials = VIALS_MAX; snprintf(t_, sizeof t_, "BLOOD VIAL X%d", g_drop_vial); snd_play(S_PICKUP, 0.9f); } g_drop_bul = g_drop_vial = 0; say(t_); } g_cur_vials = vials; g_cur_bullets = bullets; blood_gush_update(dt); if (g_shake > 0.0f) { g_shake -= dt * 2.4f; if (g_shake < 0.0f) g_shake = 0.0f; }
         tsec += dt; since_atk += dt; since_gun += dt; tsec_hud = tsec;  if (g_bt_flash > 0.0f) g_bt_flash -= dt;
         if (wm_real & SCE_CTRL_START) start_held += dt; else start_held = 0.0f;
         if (start_held > 1.5f) break;                                       // hold START 1.5 s to quit
@@ -15837,18 +17710,27 @@ int main(void) {
             attack_t = dodge_t = hurt_t = heal_t = gun_t = visc_t = pstag_t = pvis_t = -1.0f; flame_on = 0; ix_t = -1.0f; lad_i = -1;
         }
 
+        autores_tick(dt, fade_st != 0 || dead_t >= 0.0f || g_inv_open || g_wm_open || g_dlg_open || flying, cur_map);
         { static float cull_t = 0.0f; cull_t += dt; if (cull_t > 15.0f) { cull_t = 0.0f; char cb[96]; snprintf(cb, sizeof cb, "drew %u of %u chunks, %.0f fps", g_cull_drawn, g_cull_total, dt > 0.0f ? 1.0f / dt : 0.0f); maplog("cull: %s%s", cb, "");
             if (g_prof_n > 0) { char pb[160]; int nv_ = 0; for (int q = 0; q < n_en; q++) if (ENS[q].state != E_DEAD && (fabsf(ENS[q].p.x - pl.x) + fabsf(ENS[q].p.y - pl.y)) < FOG_END + 8.0f) nv_++;
                 snprintf(pb, sizeof pb, "prof ms/frame: update %.1f (enemies %.1f) draw %.1f swap %.1f | %d enemies in view of %d", g_prof[0] / g_prof_n / 1000.0, g_prof[1] / g_prof_n / 1000.0, g_prof[2] / g_prof_n / 1000.0, g_prof[3] / g_prof_n / 1000.0, nv_, n_en); maplog("%s%s", pb, "");
                 { char eb[200]; snprintf(eb, sizeof eb, "build enphys | enemy physics %.1f pose+skin %.1f ms/frame | calls/frame idle %.1f chase %.1f attack %.1f hurt %.1f dead %.1f", g_prof_e[0] / g_prof_n / 1000.0, g_prof_e[1] / g_prof_n / 1000.0, (double)g_en_st[0] / g_prof_n, (double)g_en_st[1] / g_prof_n, (double)g_en_st[2] / g_prof_n, (double)g_en_st[3] / g_prof_n, (double)g_en_st[4] / g_prof_n); maplog("%s%s", eb, ""); }
+                if (rl_map()) { char rb_[120]; snprintf(rb_, sizeof rb_, "rom prof: Rom %.1f ms, her children %.1f ms (per frame)", g_prof_rm[0] / g_prof_n / 1000.0, g_prof_rm[1] / g_prof_n / 1000.0); maplog("%s%s", rb_, ""); }
+                memset(g_prof_rm, 0, sizeof g_prof_rm);
                 memset(g_prof_e, 0, sizeof g_prof_e); memset(g_en_st, 0, sizeof g_en_st);
                 memset(g_prof, 0, sizeof g_prof); g_prof_n = 0; } } }
         if (g_arena_wait > 0.0f) { g_arena_wait -= dt; if (g_arena_wait <= 0.0f && !strcasecmp(cur_map, "gascoignearena") && en_ok) { lock_idx = -1; setup_enemies(); } }      // arena_scene: Henryk and Eileen arrive
-        if (ok && !g_dlg_open && g_gas_dead && !g_gas_redo && !g_arena_done && !strcasecmp(cur_map, "gascoignearena") && dead_t < 0.0f && fade_st == 0 && g_arena_wait <= 0.0f) {      // arena_scene: walk up to them and the scene plays
+        if (ok && !g_dlg_open && !g_rush && g_gas_dead && !g_gas_redo && !g_arena_done && !strcasecmp(cur_map, "gascoignearena") && dead_t < 0.0f && fade_st == 0 && g_arena_wait <= 0.0f) {      // arena_scene: walk up to them and the scene plays
             for (int i = 0; i < n_en; i++) if (ENS[i].type == 19 && ENS[i].placed && hypotf(ENS[i].p.x - pl.x, ENS[i].p.y - pl.y) < 9.0f && fabsf(ENS[i].p.z - pl.z) < 8.0f) { arena_scene_start(); break; }
         }
         { static float lp_t = 0.0f; lp_t += dt; if (ok && lp_t > 4.0f && dead_t < 0.0f && fade_st == 0) { lp_t = 0.0f; lastpos_write(cur_map, pl.x, pl.y, pl.z, face); } }      // lastpos: remember where you are
         { static float save_t = 0.0f; save_t += dt; if (ok && save_t > 3.0f) { save_t = 0.0f; mstate_save(); save_write(0); } }      // keep save.bin up to date
+        if (ok && !strcasecmp(cur_map, "gascoignearena")) {      /* chapel_gate_guard: every frame, until Gilbert has fallen, the gate stands shut (leaves back in their closed pose, solid again) however it got opened (a saved door state, a test file, the doors that start open) */
+            static int gg_seen_ = 0; static char gg_map_[40] = ""; if (strcmp(gg_map_, cur_map)) gg_seen_ = 0;
+            for (int gi_ = 0; gi_ < nDoors; gi_++) { Door *G_ = &doors_[gi_]; if (!chapel_gate_door(G_)) continue;
+                if (strcmp(gg_map_, cur_map) || !gg_seen_) { gg_seen_ = 1; snprintf(gg_map_, sizeof gg_map_, "%s", cur_map); char t_[200]; snprintf(t_, sizeof t_, "chapel gate door %d: leaves %d open %d st %d at %.1f %.1f z %.1f, lock %s", gi_, G_->nl, G_->open, G_->st, G_->cx, G_->cy, G_->zc, chapel_ok_() ? "off" : "on"); maplog("%s%s", t_, ""); }
+                if (!chapel_ok_()) { if (G_->open) { door_close(G_); maplog("chapel gate: it was open: shut again%s%s", "", ""); } else if (G_->nl > 0) door_set(G_, 0.0f); if (G_->st != 2) G_->st = 2; } }
+        } else { static int dummy_ = 0; (void)dummy_; }
         if (ok && !flying && dead_t < 0.0f) {                   // level loaders: walk into one to change maps
             if (fade_st == 0) {
                 int hit = -1;
@@ -15883,7 +17765,7 @@ int main(void) {
                     } else maplog("loader %s has no link in %s", ldrs[hit].name, cur_map);
                 }
             } else if (fade_st == 1) {
-                fade_a += dt / LD_FADE_OUT;
+                fade_a += dt / (g_da_cut ? 0.06f : LD_FADE_OUT);
                 if (fade_a >= 1.0f) {
                     fade_a = 1.0f;
                     char from[40]; snprintf(from, sizeof from, "%s", cur_map);
@@ -15896,7 +17778,7 @@ int main(void) {
                         if (ngp_intro) { ngp_intro = 0; intro_play(projM, &ps1, use_ps1); last = sceKernelGetProcessTimeWide(); }      // gi_intro (new game plus): the sickroom is loaded now
                         float ax = spawnX, ay = spawnY, az = spawnZ - 0.9f, ayaw = face; int found = 0;
                         for (int i = 0; i < nLdrs && pend_ld[0]; i++) if (!strcasecmp(ldrs[i].name, pend_ld)) {
-                            float gz; ax = ldrs[i].ent[0]; ay = ldrs[i].ent[1]; az = cw_floor(&world, ax, ay, ldrs[i].ent[2] + 1.0f, &gz) ? gz : ldrs[i].ent[2]; ayaw = ldrs[i].yaw; found = 1;
+                            float gz; ax = ldrs[i].ent[0]; ay = ldrs[i].ent[1]; az = cw_floor(&world, ax, ay, ldrs[i].ent[2] + 1.0f, &gz) ? gz : ldrs[i].ent[2]; { float g2_; if (az < ldrs[i].ent[2] - 2.5f && cw_floor(&world, ax, ay, ldrs[i].ent[2] + 4.0f, &g2_) && g2_ > az) az = g2_; }      /* arr_floor: the first floor found was a long way below (the arrival spot is inside a stair block): take the step surface found from higher up instead of falling through */ ayaw = ldrs[i].yaw; found = 1;
                             if (ldrs[i].type == 2 && ld_lad[i] >= 0 && ld_up[i]) {      // arriving at the foot of a ladder: stand 1 m in front of it (facing it), inside grab range
                                 const Ladder *LA = &lads[ld_lad[i]]; float ddx = ax - LA->cx, ddy = ay - LA->cy, dd = sqrtf(ddx * ddx + ddy * ddy);
                                 if (dd > 1.1f) { ax = LA->cx + ddx / dd * 1.0f; ay = LA->cy + ddy / dd * 1.0f; az = cw_floor(&world, ax, ay, ldrs[i].ent[2] + 1.0f, &gz) ? gz : az; }
@@ -15907,8 +17789,9 @@ int main(void) {
                         }
                         if (pend_ld[0] && !found) maplog("loader %s not found in the new map", pend_ld, "");
                         if (pend_lamp) { float lz_; for (int li = 0; li < nLamps; li++) if (fabsf(lamps_[li].x - g_lamp_x) < 0.5f && fabsf(lamps_[li].y - g_lamp_y) < 0.5f) { g_lamp_z = lamps_[li].z; break; } lamp_stand(&ax, &ay, &lz_); az = lz_; ayaw = atan2f(g_lamp_y - ay, g_lamp_x - ax); found = 1; pend_lamp = 0; }
-                        if (!found && g_rush && !strcasecmp(cur_map, "huntersdream")) { float gz_; ax = 0.877f; ay = -7.018f; az = cw_floor(&world, ax, ay, 2.0f, &gz_) ? gz_ : 0.152f; ayaw = 3.4866f; found = 1; }      // boss_rush: you wake at the tombstone
+                        if (!found && (g_rush || g_rl_wake) && !strcasecmp(cur_map, "huntersdream")) { g_rl_wake = 0; float gz_; ax = 0.877f; ay = -7.018f; az = cw_floor(&world, ax, ay, 2.0f, &gz_) ? gz_ : 0.152f; ayaw = 3.4866f; found = 1; }      // boss_rush: you wake at the tombstone
                         pl.x = ax; pl.y = ay; pl.z = az; pl.vz = 0; pl.grounded = 0;
+                        if (!strcasecmp(cur_map, "romlake") && !(g_story & 4)) { pl.z = az + 26.0f; g_rl_drop = 1; g_rl_dt = -20.0f; } else g_rl_drop = 0;      /* rom_drop: the lantern drops you from the sky into her lake */
                         if (found) { face = ayaw; yaw = ayaw; pitch = -0.2f; }
                         if (!found && g_hd_wait) { face = atan2f(-12.95f - ay, 6.75f - ax) + 3.14159265f; yaw = face; pitch = -0.2f; }      // hd_aim: waking up in the Hunter's Dream always faces away from the Doll (the workshop is behind her), whichever way you were facing in the map you came from
                         if (found) for (int ei = 0; ei < nElv; ei++) {      // arriving by a door: the lift waits at whichever end you came from
@@ -15917,6 +17800,9 @@ int main(void) {
                             float tz_ = fabsf(pl.z - E->zt) < fabsf(pl.z - E->zb) ? E->zt : E->zb;
                             if (fabsf(tz_ - E->cur) > 0.01f) { elv_shift(E, tz_ - E->cur); E->cur = tz_; }
                         }
+                        if (chapel_ok_() && (g_story & 16) && !strcasecmp(cur_map, "gascoignearena")) for (int gi_ = 0; gi_ < nDoors; gi_++) { Door *G_ = &doors_[gi_]; if (chapel_gate_door(G_)) { for (int k_ = 0; k_ < G_->nl; k_++) G_->lf[k_].sgn = 1.0f; G_->st = 1; G_->open = 1; door_set(G_, 1.0f); door_nocollide(G_); } }      /* chapel_gate_open: the gate you have opened once stays open: just walk in */
+                        { char t_[120]; if (!strcasecmp(cur_map, "gascoignearena")) { int ng_ = 0, nl_ = 0; for (int q_ = 0; q_ < nDoors; q_++) ng_ += chapel_gate_door(&doors_[q_]); for (int q_ = 0; q_ < nLdrs; q_++) nl_ += chapel_loader_(q_); snprintf(t_, sizeof t_, "chapel gate: story %d, gilbert dead %d redo %d, badge %d, free doors %d, gate doors %d, chapel loaders %d", g_story, g_gb_dead, g_gb_redo, inv_have("LostHunterBadge"), (int)g_doors_free, ng_, nl_); maplog("%s%s", t_, ""); } }
+                        if (!chapel_ok_() && !strcasecmp(cur_map, "gascoignearena")) for (int gi_ = 0; gi_ < nDoors; gi_++) { Door *G_ = &doors_[gi_]; if (chapel_gate_door(G_) && G_->open) { door_close(G_); G_->st = 2; } }      /* chapel_gate_shut: until Gilbert has fallen and you have opened it yourself, the gate is shut however the map was left (an earlier game, a test file) */
                         attack_t = dodge_t = hurt_t = heal_t = gun_t = visc_t = pstag_t = pvis_t = -1.0f; flame_on = 0; ix_t = -1.0f; lad_i = -1; lock_idx = -1; last_hit = 0;
                         if (en_ok) { for (int i = 0; i < NUM_ENEMIES; i++) enemy_reset(i, pl.x, pl.y, pl.z); mstate_restore_enemies(); }
                         ld_armed = 0;
@@ -15969,7 +17855,7 @@ int main(void) {
             }
             if (lock_idx >= 0 && !en_targetable(lock_idx, &pl, LOCK_RANGE * 1.3f)) lock_idx = en_pick(&pl, yaw);   // died / lost: next best, or off
             int sw = flick; if (!sw && fabsf(rxv) > 0.7f && fabsf(prev_rx) < 0.4f) sw = rxv > 0.0f ? 1 : -1;
-            if (lock_idx != lock_prev) { lock_pt = 0; lock_prev = lock_idx; }
+            if (lock_idx != lock_prev) { lock_pt = 0; lock_prev = lock_idx; }      // the Amygdala is locked on low at his hind legs first (point 0); stick up moves to the middle of his body
             int vsw = flickv; if (!vsw && fabsf(ryv) > 0.7f && fabsf(prev_ry) < 0.4f) vsw = ryv < 0.0f ? 1 : -1;           // stick up / down: 1 = up
             if (lock_idx >= 0 && en_lp_count(lock_idx) > 1) {      // the Cleric Beast: three points - up goes legs -> body -> head, down goes back
                 if (vsw > 0) lock_pt = 1;
@@ -16007,6 +17893,7 @@ int main(void) {
             FILE *cf_ = fopen("ux0:data/bbpsx/chair_dz.txt", "w"); if (cf_) { fprintf(cf_, "%.2f\n", g_chair_dz); fclose(cf_); }
             char t_[48]; snprintf(t_, sizeof t_, "CHAIR HEIGHT %.2f", g_chair_dz); say(t_);
         }
+        if (moon_map() && g_moon_have && (pad.buttons & SCE_CTRL_LTRIGGER) && (pad.buttons & SCE_CTRL_RTRIGGER) && (pressed & SCE_CTRL_SQUARE) && en_ok && BS.idx >= 0 && BS.idx < n_en && ENS[BS.idx].state != E_DEAD) { moon_swap_form(g_moon_form ? 0 : 1); say(g_moon_form ? "SECOND FORM" : "FIRST FORM"); pressed &= ~SCE_CTRL_SQUARE; }      /* moon_arena: L1 + R1 + SQUARE swaps his form */
         if ((pad.buttons & SCE_CTRL_LTRIGGER) && (pad.buttons & SCE_CTRL_RTRIGGER) && (pressed & (SCE_CTRL_UP | SCE_CTRL_DOWN | SCE_CTRL_LEFT | SCE_CTRL_RIGHT | SCE_CTRL_TRIANGLE | SCE_CTRL_CROSS))) {      // wch_tune: L1 + R1 + D-pad moves the wheelchair beside him (up/down = forward/back, left/right = sideways), triangle / cross turn it 15 degrees; saved to wheelchair.txt
             int any_ = 0; for (int i = 0; i < n_en; i++) if (ENS[i].type == 17 && ENS[i].wch) any_ = 1;
             if (any_) {
@@ -16027,8 +17914,8 @@ int main(void) {
         if (g_paper_t > 0.0f) { if (wpn_r() != g_paper_w || wpn_r() == 11) g_paper_t = 0.0f; else { g_paper_t -= dt; if (g_paper_t <= 0.0f) { g_paper_t = 0.0f; say("THE PAPER BURNS OUT"); } } }
         if (wpn_r() != 11) g_toni_t = 0.0f; else if (g_toni_t > 0.0f) { g_toni_t -= dt; if (g_toni_t <= 0.0f) { g_toni_t = 0.0f; snd_play(S_W_TONI_BREAK, 1.0f); } }
         if (hunter_ok && wpn_r() == 11 && (pressed & SCE_CTRL_SQUARE) && attack_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f && dodge_t < 0.0f && gun_t < 0.0f && visc_t < 0.0f) { g_toni_t = TONI_CHARGE; heal_toni = 1; heal_dur = a_heal >= 0 ? H.anim[a_heal].nf / H.anim[a_heal].fps : 1.3f; if (heal_dur > 2.5f) heal_dur = 2.5f; if (heal_dur < 0.6f) heal_dur = 0.6f; if (g_lay_ok && a_heal >= 0) { toni_t = 0.0f; toni_dur = H.anim[a_heal].nf / H.anim[a_heal].fps; } else { heal_t = 0.0f; heal_done = 1; } snd_play_lr(S_LIGHTNING, 0.22f, 0.22f, 1.35f); snd_play(S_W_TONI_ACT, 1.0f); }
-        { static int last_wr = -9; if (wpn_r() != last_wr) { if (last_wr == 1 || wpn_r() == 1) { cl_open = 0; xform_t = -1.0f; wa_cur = wa_cidle >= 0 ? wa_cidle : wa_close; wt = 999.0f; } last_wr = wpn_r(); } }
-        if (wpn_r() == 1 && hunter_ok && ((pressed & SCE_CTRL_SQUARE) || (cl_open && (pressed & SCE_CTRL_LTRIGGER))) && xform_t < 0.0f && attack_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f && dodge_t < 0.0f && gun_t < 0.0f && visc_t < 0.0f && !flame_on) {
+        { static int last_wr = -9; if (wpn_r() != last_wr) { if (last_wr == 1 || last_wr == 15 || wr_axe_) { cl_open = 0; xform_t = -1.0f; wa_cur = wa_cidle >= 0 ? wa_cidle : wa_close; wt = 999.0f; } last_wr = wpn_r(); } }
+        if (wr_axe_ && hunter_ok && ((pressed & SCE_CTRL_SQUARE) || (cl_open && (pressed & SCE_CTRL_LTRIGGER))) && xform_t < 0.0f && attack_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f && dodge_t < 0.0f && gun_t < 0.0f && visc_t < 0.0f && !flame_on) {
                                        // the Hunter's Axe: SQUARE takes it in both hands (or back to one), L1 lets go of the second hand
             snd_xform(0.6f);      // axe_grip_snd: the lever (switch) sound, as in the earlier builds
             if (a_2htr >= 0) {                                              // Gascoigne's 2HTransform plays (reversed to let go); the grip changes at the end
@@ -16047,14 +17934,14 @@ int main(void) {
         if (g_menu_ps1) { if (ps1_ok) use_ps1 = !use_ps1; g_menu_ps1 = 0; }      // System menu: PS1 shader / plain renderer
         if ((pressed & (g_lefty ? SCE_CTRL_LEFT : SCE_CTRL_RIGHT)) && !flying) { int w = wpn_swap(1); (void)w; }       // D-pad right: other right-hand weapon
         if ((pressed & (g_lefty ? SCE_CTRL_RIGHT : SCE_CTRL_LEFT)) && !flying) { int w = wpn_swap(0); (void)w; }         // D-pad left: other left-hand weapon
-        { int want = (wpn_r() > 1 && wpn_r() < 12 && g_xn[wpn_r()] > 0) ? wpn_r() : 0;                  // which transforming weapon's animation set is active
+        { int want = (wpn_r() > 1 && wpn_r() < NWPN && g_xn[wpn_r()] > 0) ? wpn_r() : 0;                  // which transforming weapon's animation set is active
           if (hunter_ok && want != xf_cur && g_cl_wa) {
               xf_cur = want; H.wanim = want ? g_xa[want] : g_cl_wa; H.nWA = want ? g_xn[want] : g_cl_n; H.wset = 0;
               wa_open = weapon_pick("Open"); wa_close = weapon_pick("Close"); wa_oidle = weapon_pick("OpenIdle"); wa_cidle = weapon_pick("CloseIdle");
               cl_open = 0; xform_t = -1.0f; wa_cur = wa_cidle >= 0 ? wa_cidle : wa_close; wt = 999.0f;
               { char b[200]; snprintf(b, sizeof b, "xf switch w=%d nWA=%u open=%d close=%d oidle=%d cidle=%d", want, (unsigned)H.nWA, wa_open, wa_close, wa_oidle, wa_cidle); maplog("%s%s", b, ""); }
           } }
-        { static int dbg_w = -9; if (wpn_r() != dbg_w) { dbg_w = wpn_r(); char b[200]; snprintf(b, sizeof b, "equip w=%d xn=%u xf_cur=%d xform=%d nWA=%u", dbg_w, dbg_w > 0 && dbg_w < 12 ? (unsigned)g_xn[dbg_w] : 0u, xf_cur, wpn_r_xform(), (unsigned)H.nWA); maplog("%s%s", b, ""); } }
+        { static int dbg_w = -9; if (wpn_r() != dbg_w) { dbg_w = wpn_r(); char b[200]; snprintf(b, sizeof b, "equip w=%d xn=%u xf_cur=%d xform=%d nWA=%u", dbg_w, dbg_w > 0 && dbg_w < NWPN ? (unsigned)g_xn[dbg_w] : 0u, xf_cur, wpn_r_xform(), (unsigned)H.nWA); maplog("%s%s", b, ""); } }
         g_hide_wpn = lad_i >= 0; HUNT.hide_w = !wpn_r_cleaver() || g_hide_wpn;      // ladder_hide                                      // only the cleaver has a model so far
         if (nLamps && strcmp(lamp_ovr_map, cur_map)) {                       // a saved lantern position for this map (lamp_<map>.txt, written by D-pad up)
             snprintf(lamp_ovr_map, sizeof lamp_ovr_map, "%s", cur_map);
@@ -16201,7 +18088,7 @@ int main(void) {
             }
             // --- flamesprayer: hold L1 to spray; one bullet when it starts, then one every 0.6 s
             if (flame_on && (!(pad.buttons & SCE_CTRL_LTRIGGER) || wpn_l() != 8 || attack_t >= 0.0f || dodge_t >= 0.0f || hurt_t >= 0.0f || heal_t >= 0.0f || visc_t >= 0.0f || pstag_t >= 0.0f || ix_t >= 0.0f || lad_i >= 0 || g_hide_wpn || !hunter_ok)) { flame_on = 0; snd_play(S_HOLSTER, 0.7f); }
-            if (!flame_on && hunter_ok && wpn_l() == 8 && (pressed & SCE_CTRL_LTRIGGER) && !busy && xform_t < 0.0f && !(wpn_r() == 1 && cl_open)) {
+            if (!flame_on && hunter_ok && wpn_l() == 8 && (pressed & SCE_CTRL_LTRIGGER) && !busy && xform_t < 0.0f && !(w2h_open_)) {
                 if (bullets + g_bxtra >= 1) { flame_on = 1; flame_clk = 0.0f; flame_hit_t = 0.0f; BUL_SPEND(1); snd_play(g_snd_nv[S_W_FLAME_START] ? S_W_FLAME_START : S_GUN_DRAW, 0.8f); busy = 1; if (locked) face = lock_ang; }
                 else snd_play(S_GUN_EMPTY, 0.9f);
             }
@@ -16225,9 +18112,9 @@ int main(void) {
                 busy = 1;
             }
             // --- the axe's spin: hold R1 while it is extended (two-handed halberd form) for a double 360 degree sweep
-            if (wpn_r() == 1 && cl_open && (pad.buttons & SCE_CTRL_RTRIGGER)) { if (!spin_latch) spin_hold += dt; } else { spin_hold = 0.0f; spin_latch = 0; }
+            if (w2h_open_ && (pad.buttons & SCE_CTRL_RTRIGGER)) { if (!spin_latch) spin_hold += dt; } else { spin_hold = 0.0f; spin_latch = 0; }
             if (hunter_ok && spin_hold > 0.45f && !spin_on && !spin_latch && xform_t < 0.0f && dodge_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f && visc_t < 0.0f && gun_t < 0.0f && a_attack_open >= 0 && stam >= COST_ATTACK_OPEN * 1.5f) {
-                atk_mult = 1.0f; spin_latch = 1; spin_hold = 0.0f; spin_on = 1; spin_left = a_2hspin >= 0 ? 0 : 1; memset(spin_hit, 0, sizeof spin_hit);
+                atk_mult = 1.0f; spin_latch = 1; spin_hold = 0.0f; spin_on = 1; spin_left = a_2hspin >= 0 ? 0 : 1; memset(spin_hit, 0, sizeof spin_hit); spin_seg = 0;
                 atk_anim = a_2hspin >= 0 ? a_2hspin : a_attack_open; atk_rev = 0; attack_dur = H.anim[atk_anim].nf / H.anim[atk_anim].fps / (a_2hspin >= 0 ? 1.0f : OPEN_SPEED * 1.1f);
                 if (a_2hspin >= 0) spin_left = -1;
                 snd_play(wsl(S_SWING_HEAVY, cl_open), 1.0f); attack_t = 0.0f; swing_hit = 1; stam -= COST_ATTACK_OPEN * 1.5f * wpn_stam(); stam_delay = STAM_DELAY; atk_vx = atk_vy = 0.0f;
@@ -16235,10 +18122,10 @@ int main(void) {
             }
             // --- charged attack: hold R1 (axe in both hands: the spin takes over) to wind up, let go to strike
             {
-                int hw_ = (wpn_r() < 0) ? 3 : wpn_r(), hf_ = (cl_open && wpn_r() != 1) ? 1 : 0, hv = -1;
+                int hw_ = (wpn_r() < 0) ? 3 : (wpn_r() == 15 ? 1 : wpn_r()), hf_ = (cl_open && !wr_axe_) ? 1 : 0, hv = -1;
                 for (int q = 0; q < N_HVY; q++) if (HVY[q].w == hw_ && HVY[q].open == hf_ && hv_atk[q] >= 0) { hv = q; break; }
                 int r1_ = (pad.buttons & SCE_CTRL_RTRIGGER) != 0;
-                if (r1_ && chg_t < 0.0f && !chg_latch && hv >= 0 && !(wpn_r() == 1 && cl_open)) chg_hold += dt; else if (!r1_) { chg_hold = 0.0f; chg_latch = 0; }
+                if (r1_ && chg_t < 0.0f && !chg_latch && hv >= 0 && !(w2h_open_)) chg_hold += dt; else if (!r1_) { chg_hold = 0.0f; chg_latch = 0; }
                 if (hunter_ok && chg_t < 0.0f && hv >= 0 && chg_hold > 0.22f && !chg_latch && xform_t < 0.0f && dodge_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f && visc_t < 0.0f && gun_t < 0.0f && !flame_on && stam >= COST_ATTACK * 1.5f) {
                     chg_latch = 1; chg_hold = 0.0f; chg_i = hv; chg_t = 0.0f; attack_t = -1.0f; spin_on = 0; busy = 1;
                     if (hv_chg[hv] >= 0 && !g_lay_ok) { a_prev = a_cur; t_prev = t_cur; a_cur = hv_chg[hv]; t_cur = 0.0f; blend = 1.0f; blend_len = 0.12f; }
@@ -16254,20 +18141,22 @@ int main(void) {
                     }
                 }
             }
-            int chain_ok = attack_t >= 0.0f && attack_t > attack_dur * (cl_open ? OPEN_CHAIN : ((wpn_r() < 0 || wpn_r() == 3) ? 0.45f : 0.7f)) && dodge_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f;     // spam R1: the next swing starts in the tail of this one
+            int chain_ok = attack_t >= 0.0f && attack_t > attack_dur * (cl_open ? OPEN_CHAIN * (wpn_r() == 14 ? 0.92f : 1.0f) : ((wpn_r() < 0 || wpn_r() == 3) ? 0.45f : 0.7f)) && dodge_t < 0.0f && hurt_t < 0.0f && heal_t < 0.0f;     // spam R1: the next swing starts in the tail of this one
             int r1_atk_;      // r1_tap: a weapon that can charge swings on a short tap's release, so holding R1 to charge never does a quick swing first
             { static float r1_held_ = 0.0f; int r1_dn_ = (pad.buttons & SCE_CTRL_RTRIGGER) != 0; if (r1_dn_) r1_held_ += dt;
-              int hw2_ = (wpn_r() < 0) ? 3 : wpn_r(), hf2_ = (cl_open && wpn_r() != 1) ? 1 : 0, ca_ = (wpn_r() == 1 && cl_open && a_attack_open >= 0) ? 1 : 0;
+              int hw2_ = (wpn_r() < 0) ? 3 : (wpn_r() == 15 ? 1 : wpn_r()), hf2_ = (cl_open && !wr_axe_) ? 1 : 0, ca_ = (w2h_open_ && a_attack_open >= 0) ? 1 : 0;
               for (int q = 0; q < N_HVY; q++) if (HVY[q].w == hw2_ && HVY[q].open == hf2_ && hv_atk[q] >= 0) { ca_ = 1; break; }
-              if (ca_) r1_atk_ = ((rel_ & SCE_CTRL_RTRIGGER) != 0) && r1_held_ <= ((wpn_r() == 1 && cl_open) ? 0.45f : 0.22f) && chg_t < 0.0f && !chg_latch && !spin_on; else r1_atk_ = (pressed & SCE_CTRL_RTRIGGER) != 0;
+              if (ca_) r1_atk_ = ((rel_ & SCE_CTRL_RTRIGGER) != 0) && r1_held_ <= ((w2h_open_) ? 0.45f : 0.22f) && chg_t < 0.0f && !chg_latch && !spin_on; else r1_atk_ = (pressed & SCE_CTRL_RTRIGGER) != 0;
               if (!r1_dn_) r1_held_ = 0.0f; }
             if (hunter_ok && r1_atk_ && (!busy || chain_ok) && xform_t < 0.0f && stam >= (cl_open ? COST_ATTACK_OPEN : COST_ATTACK) && ((cl_open && a_attack_open >= 0) || a_attack >= 0)) {
                 atk_mult = 1.0f; atk_anim = (cl_open && a_attack_open >= 0) ? a_attack_open : a_attack;
                 atk_rev = (attack_t >= 0.0f || since_atk < 0.45f) ? !atk_rev : 0;     // chained taps: every second swing plays backwards
-                if (wpn_r() == 1 && cl_open && n_2hatk > 0) { atk_anim = a_2hatk[i_2hatk++ % n_2hatk]; atk_rev = 0; }
+                if (wpn_r() == 15 && cl_open) { g_ml_chain = (attack_t >= 0.0f || since_atk < 0.6f) ? g_ml_chain + 1 : 1; g_ml_fire = (g_ml_chain % 3) == 0; }      /* moonlight_sword: the third swing of a two-handed chain throws the wave */
+                if (w2h_open_ && wpn_r() == 15 && n_mlatk > 0) { if (g_ml_swp && a_mlswp >= 0 && (attack_t >= 0.0f || since_atk < 1.5f)) { atk_anim = a_mlswp; atk_rev = 1; g_ml_swp = 0; } else { atk_anim = a_mlatk[i_mlatk++ % n_mlatk]; atk_rev = 0; g_ml_swp = (a_mlswp >= 0 && atk_anim == a_mlswp) ? 1 : 0; } }      /* moon_swipe: the horizontal swipe played forward is followed, on the next R, by the same swipe played backwards, so it cuts both ways */
+                else if (w2h_open_ && n_2hatk > 0) { atk_anim = a_2hatk[i_2hatk++ % n_2hatk]; atk_rev = 0; }
                 if (wpn_r() == 4 && n_bom > 0) { if (!(attack_t >= 0.0f || since_atk < 0.45f)) i_bom = 0; atk_anim = a_bom[i_bom++ % n_bom]; atk_rev = 0; }          // Blades of Mercy: right, left, right, left...
                 if ((wpn_r() < 0 || wpn_r() == 3) && n_fist > 0) { atk_anim = a_fist[i_fist++ % n_fist]; atk_rev = 0; }          // nothing in the right hand: punches          // the axe in both hands: Gascoigne's two-handed swings in turn
-                attack_dur = H.anim[atk_anim].nf / H.anim[atk_anim].fps / (cl_open ? OPEN_SPEED : ((wpn_r() < 0 || wpn_r() == 3) ? 1.6f : 1.0f));     // the long transformed swings are sped up so spamming feels as snappy as the folded form
+                attack_dur = H.anim[atk_anim].nf / H.anim[atk_anim].fps / (cl_open ? OPEN_SPEED * (wpn_r() == 14 ? BB_FAST : 1.0f) : ((wpn_r() < 0 || wpn_r() == 3) ? 1.6f : 1.0f));     // the long transformed swings are sped up so spamming feels as snappy as the folded form
                 snd_play(wsl(cl_open ? S_SWING_HEAVY : S_SWING, cl_open), 0.9f);
                 attack_t = 0.0f; g_pl_atk_go++; swing_hit = 0; stam -= (cl_open ? COST_ATTACK_OPEN : COST_ATTACK) * wpn_stam(); stam_delay = STAM_DELAY;
                 float tx = H.anim[atk_anim].tx, ty = H.anim[atk_anim].ty;
@@ -16343,6 +18232,13 @@ int main(void) {
                 if (heal_dur > 2.5f) heal_dur = 2.5f; if (heal_dur < 0.6f) heal_dur = 0.6f;
                 heal_t = 0.0f; heal_done = 0; heal_toni = 0; busy = 1; g_pl_heal_go = 1; snd_play(S_DRINK, 1.0f);
             }
+            if (g_rl_drop || g_rl_dt > 0.0f) {      /* rom_drop: you fall from the sky with the lantern, take no harm, lie where you land and get up; then the fight is on */
+                if (g_rl_drop == 1) { g_rl_dt += dt; glow_add_c(pl.x, pl.y, pl.z + 1.5f, 2.4f, 0); if (g_rl_dt > 0.0f) { g_rl_drop = 0; g_rl_dt = 3.0f; } }
+                if (g_rl_drop == 1 && pl.grounded && ix_t < 0.0f && hunter_ok) { int a_ = hunter_anim_find("HunterHurt_Land"); g_rl_drop = 2; g_rl_dt = 3.0f; if (a_ >= 0) { ix_door = -2; ix_sw = -1; ix_dsw = -1; ix_col = 0; ix_t = 0.0f; ix_trav = 0; ix_anim = a_; ix_dur = H.anim[a_].nf / H.anim[a_].fps; if (ix_dur < 0.8f) ix_dur = 0.8f; if (ix_dur > 3.5f) ix_dur = 3.5f; a_prev = a_cur; t_prev = t_cur; a_cur = a_; t_cur = 0.0f; blend = 1.0f; blend_len = 0.15f; busy = 1; snd_play(S_STEP, 1.0f); g_shake = 0.3f; } else g_rl_drop = 0; }
+                else if (g_rl_drop == 2 && ix_t < 0.0f && hunter_ok) { int a_ = hunter_anim_find("HunterHurt_GetUp"); g_rl_drop = 3; if (a_ >= 0) { ix_door = -2; ix_sw = -1; ix_dsw = -1; ix_col = 0; ix_t = 0.0f; ix_trav = 0; ix_anim = a_; ix_dur = H.anim[a_].nf / H.anim[a_].fps; if (ix_dur < 0.8f) ix_dur = 0.8f; if (ix_dur > 3.5f) ix_dur = 3.5f; a_prev = a_cur; t_prev = t_cur; a_cur = a_; t_cur = 0.0f; blend = 1.0f; blend_len = 0.15f; busy = 1; } else g_rl_drop = 0; }
+                else if (g_rl_drop == 3 && ix_t < 0.0f) g_rl_drop = 0;
+                if (g_rl_drop != 1 && g_rl_dt > 0.0f) g_rl_dt -= dt;
+            }
             // --- interact (D-pad down): open a door, or grab a ladder
             g_prompt = 0;
             if (hunter_ok && !busy && xform_t < 0.0f && pl.grounded) {
@@ -16355,6 +18251,28 @@ int main(void) {
                 int bk = (di >= 0 || li >= 0 || si >= 0 || ds >= 0 || ni >= 0 || wi >= 0) ? 0 : (!strcasecmp(cur_map, "huntersworkshop") && bench_near(pl.x, pl.y, pl.z));      // workbench
                 int stk = (di >= 0 || li >= 0 || si >= 0 || ds >= 0 || ni >= 0 || wi >= 0 || bk) ? 0 : (!strcasecmp(cur_map, "huntersworkshop") && store_near_r(pl.x, pl.y, pl.z, 2.0f));      // item storage
                 g_prompt = di >= 0 || li >= 0 || si >= 0 || ds >= 0 || ni >= 0 || wi >= 0 || bk || stk;
+                { float nx_, ny_; if (sick2_note_pos(&nx_, &ny_)) {      /* sick2_note: a warm glow on the table; X reads its note, which opens the way to Byrgenwerth at the tombstone */
+                    glow_add_c(nx_, ny_, pl.z + 0.55f, 1.3f, 0);
+                    if (hypotf(nx_ - pl.x, ny_ - pl.y) < 1.7f) { g_prompt = 1;
+                        if (pressed & SCE_CTRL_CROSS) { pressed &= ~SCE_CTRL_CROSS; g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = -1; g_dlg_name = "A note"; memset(g_dlg_spk, 0, sizeof g_dlg_spk); g_win_x = nx_; g_win_y = ny_;
+                            g_dlg[g_dlg_n++] = "You have seen things, have you not?";
+                            for (int k_ = 0; k_ < g_dlg_n; k_++) g_dlg_snd[k_] = -1; g_dlg_open = 1;
+                            g_story |= 32; story_save(); say("BYRGENWERTH IS OPEN AT THE TOMBSTONE"); snd_play(S_PICKUP, 1.0f); maplog("story: the other sickroom's note is read%s%s", "", ""); } } } }
+                { float nx_, ny_; if (chapel_note_pos(&nx_, &ny_)) {      /* chapel_note: a hunter's note by the lantern; reading it opens the way to Moonside Lake */
+                    glow_add_c(nx_, ny_, pl.z + 0.25f, 0.9f, 0);
+                    if (hypotf(nx_ - pl.x, ny_ - pl.y) < 1.7f) { g_prompt = 1;
+                        if (pressed & SCE_CTRL_CROSS) { pressed &= ~SCE_CTRL_CROSS; g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = -1; g_dlg_name = "A hunter's note"; memset(g_dlg_spk, 0, sizeof g_dlg_spk); g_win_x = nx_; g_win_y = ny_;
+                            g_dlg[g_dlg_n++] = "To whoever carries the badge of the lost hunters,";
+                            g_dlg[g_dlg_n++] = "Beyond the dream there is a lake under a white sky, and it hides what the moon is hiding.";
+                            for (int k_ = 0; k_ < g_dlg_n; k_++) g_dlg_snd[k_] = -1; g_dlg_open = 1;
+                            g_story |= 2; story_save(); say("MOONSIDE LAKE IS OPEN. THE MESSENGERS SELL THE MOONLIGHT SWORD."); snd_play(S_PICKUP, 1.0f); maplog("story: the chapel note is read%s%s", "", ""); } } } }
+                if (!strcasecmp(cur_map, "huntersworkshop")) {      /* ws_note: a note that stays in the Workshop for good (never used up, no story flag): at the lit spot by the archway; ws_note.txt = "x y" moves it */
+                    static float wx_ = 21.6f, wy_ = 18.6f; static int wl_ = 0; if (!wl_) { wl_ = 1; FILE *wf_ = fopen("ux0:data/bbpsx/ws_note.txt", "r"); if (wf_) { float a_, b_; if (fscanf(wf_, "%f %f", &a_, &b_) == 2) { wx_ = a_; wy_ = b_; } fclose(wf_); } }
+                    glow_add_c(wx_, wy_, pl.z + 0.4f, 0.9f, 0);
+                    if (hypotf(wx_ - pl.x, wy_ - pl.y) < 1.7f) { g_prompt = 1;
+                        if (pressed & SCE_CTRL_CROSS) { pressed &= ~SCE_CTRL_CROSS; g_dlg_cont = 0; g_dlg_n = 0; g_dlg_i = 0; g_dlg_who = -1; g_dlg_name = "A note"; memset(g_dlg_spk, 0, sizeof g_dlg_spk); g_win_x = wx_; g_win_y = wy_;
+                            g_dlg[g_dlg_n++] = "You are not the first hunter who wanted to give up.";
+                            for (int k_ = 0; k_ < g_dlg_n; k_++) g_dlg_snd[k_] = -1; g_dlg_open = 1; snd_play(S_PICKUP, 1.0f); } } }
                 if ((pressed & SCE_CTRL_CROSS) && stk) { g_store_ui = 1; g_store_sel = 0; g_lamp_i = -1; face = atan2f(g_store_pt[1] - pl.y, g_store_pt[0] - pl.x); snd_play(S_LANTERN, 0.6f); } else
                 if ((pressed & SCE_CTRL_CROSS) && bk) { face = atan2f((fabsf(pl.y - BENCH_Y) < fabsf(pl.y + BENCH_Y) ? BENCH_Y : -BENCH_Y) - pl.y, BENCH_X - pl.x); g_up_ui = 2; g_up_sel = 0; g_up_who = -1; snd_play(S_LANTERN, 0.6f); } else
                 if ((pressed & SCE_CTRL_CROSS) && wi >= 0) { face = atan2f(WINNPC[wi].y - pl.y, WINNPC[wi].x - pl.x); win_talk(wi); } else
@@ -16617,10 +18535,10 @@ int main(void) {
                     g_prompt_x = 1;
                     if (pressed & SCE_CTRL_CROSS) {
                         int mi_ = up_mat_idx(2);
-                        if (!(g_gas_dead && !g_gas_redo) && !(g_cb_dead && !g_cb_redo) && !(g_gh_dead && !g_gh_redo) && !(g_gb_dead && !g_gb_redo)) { snd_play(S_UIBAD, 0.8f); say("NO FALLEN BOSS TO CALL BACK"); }
+                        if (!(g_gas_dead && !g_gas_redo) && !(g_cb_dead && !g_cb_redo) && !(g_gh_dead && !g_gh_redo) && !(g_gb_dead && !g_gb_redo) && !amg_dead_get()) { snd_play(S_UIBAD, 0.8f); say("NO FALLEN BOSS TO CALL BACK"); }
                         else if (mi_ < 0 || g_inv[mi_].n < 1) { snd_play(S_UIBAD, 0.8f); say("YOU HAVE NO BLOODSTONE CHUNK"); }
                         else if (gp_t <= 0.0f) { gp_t = 4.0f; snd_play(S_LANTERN, 0.6f); say("PRESS X AGAIN TO OFFER A BLOODSTONE CHUNK"); }
-                        else { g_inv[mi_].n--; if (g_gas_dead) g_gas_redo = 1; if (g_cb_dead) g_cb_redo = 1; if (g_gh_dead) { if (!g_gh_redo && g_ghn_slot >= 0 && g_ghn_slot < n_en && ENS[g_ghn_slot].type == 22) { ENS[g_ghn_slot].hx = g_ghn_pos[0]; ENS[g_ghn_slot].hy = g_ghn_pos[1]; ENS[g_ghn_slot].hz = g_ghn_pos[2]; ENS[g_ghn_slot].p.x = g_ghn_pos[0]; ENS[g_ghn_slot].p.y = g_ghn_pos[1]; ENS[g_ghn_slot].p.z = g_ghn_pos[2]; for (int sm_ = 0; sm_ < 14; sm_++) smoke_puff(g_ghn_pos[0] + (frand() - 0.5f) * 0.8f, g_ghn_pos[1] + (frand() - 0.5f) * 0.8f, g_ghn_pos[2] + 0.1f + frand() * 1.5f, 1.6f); snd_play(S_FOG, 0.9f); } g_gh_redo = 1; } if (g_gb_dead) g_gb_redo = 1; gp_t = 0.0f; g_flash = 0.8f; snd_play(S_LANTERN, 1.0f); say("THE BOSSES STIR ONCE MORE"); save_write(0); maplog("rematch: bosses called back%s%s", "", ""); }
+                        else { g_inv[mi_].n--; if (amg_dead_get()) g_amg_rez = 1; if (g_gas_dead) g_gas_redo = 1; if (g_cb_dead) g_cb_redo = 1; if (g_gh_dead) { if (!g_gh_redo && g_ghn_slot >= 0 && g_ghn_slot < n_en && ENS[g_ghn_slot].type == 22) { ENS[g_ghn_slot].hx = g_ghn_pos[0]; ENS[g_ghn_slot].hy = g_ghn_pos[1]; ENS[g_ghn_slot].hz = g_ghn_pos[2]; ENS[g_ghn_slot].p.x = g_ghn_pos[0]; ENS[g_ghn_slot].p.y = g_ghn_pos[1]; ENS[g_ghn_slot].p.z = g_ghn_pos[2]; for (int sm_ = 0; sm_ < 14; sm_++) smoke_puff(g_ghn_pos[0] + (frand() - 0.5f) * 0.8f, g_ghn_pos[1] + (frand() - 0.5f) * 0.8f, g_ghn_pos[2] + 0.1f + frand() * 1.5f, 1.6f); snd_play(S_FOG, 0.9f); } g_gh_redo = 1; } if (g_gb_dead) g_gb_redo = 1; gp_t = 0.0f; g_flash = 0.8f; snd_play(S_LANTERN, 1.0f); say("THE BOSSES STIR ONCE MORE"); save_write(0); maplog("rematch: bosses called back%s%s", "", ""); }
                     }
                 }
             }
@@ -16629,7 +18547,8 @@ int main(void) {
                     g_prompt_x = 1;
                     if (pressed & SCE_CTRL_CROSS) {
                         if (g_rush) {      // boss_rush: no list, the tombstone only leads to the next boss
-                            if (g_rush_i >= 3) { snd_play(S_UIBAD, 0.8f); say("GEHRMAN WAITS BY HIS GATE"); }
+                            if (g_rush_i == 5) { snd_play(S_UIBAD, 0.8f); say("GEHRMAN WAITS IN THE DREAM: TALK TO HIM"); }
+                            else if (g_rush_i >= 6) { snd_play(S_UIBAD, 0.8f); say("THE RUSH IS OVER"); }
                             else if (g_rush_ask <= 0.0f) { g_rush_ask = 4.0f; snd_play(S_LANTERN, 0.6f); say("PRESS X AGAIN FOR NEXT BOSS"); }
                             else {
                                 char dp_[96]; snprintf(dp_, sizeof dp_, "ux0:data/bbpsx/level_%s.bin", RUSH_MAPS[g_rush_i]);
@@ -16641,21 +18560,22 @@ int main(void) {
                     }
                     break;
                 }
+            if (g_rush && nLamps && strcasecmp(cur_map, "huntersdream")) lamps_gate();      /* boss_rush: if a lantern turned up late, it is taken away again at once (no lighting one early) */
             if (g_rush) {      // boss_rush: the run: a boss falls -> after a few seconds you wake in the Dream; the last one is Gehrman
                 if (g_rush_ask > 0.0f) g_rush_ask -= dt;
                 if (dead_t < 0.0f && g_cut_t < 0.0f) g_rush_time += dt;
                 if (g_rush_heal) { g_rush_heal = 0; hp = HP_MAX; rally = 0.0f; stam = STAM_MAX; if (vials < 10) vials = 10; if (bullets < 10) bullets = 10; g_cur_vials = vials; g_cur_bullets = bullets; }
-                int clr_ = (g_rush_i == 0 && cb_map() && g_cb_dead && !g_cb_redo) || (g_rush_i == 1 && !strcasecmp(cur_map, "gascoignearena") && g_gas_dead && !g_gas_redo) || (g_rush_i == 2 && gb_map() && g_gb_dead && !g_gb_redo) || (g_rush_i == 3 && g_gh_dead && !g_gh_redo);
+                int clr_ = (g_rush_i == 0 && cb_map() && !rom_map() && g_cb_dead && !g_cb_redo) || (g_rush_i == 1 && !strcasecmp(cur_map, "gascoignearena") && g_gas_dead && !g_gas_redo) || (g_rush_i == 2 && gb_map() && g_gb_dead && !g_gb_redo) || (g_rush_i == 3 && rl_map() && BS.dead_done) || (g_rush_i == 4 && rom_map() && !rl_map() && !moon_map() && BS.dead_done) || (g_rush_i == 5 && !strcasecmp(cur_map, "huntersdream") && g_gh_dead && !g_gh_redo);      // (the fourth: the Amygdala is down)
                 if (clr_ && g_rush_clr < 0.0f) g_rush_clr = 7.0f;
                 if (g_rush_clr >= 0.0f) { g_rush_clr -= dt; if (g_rush_clr < 0.0f) g_rush_clr = 0.0f; }
                 if (g_rush_clr == 0.0f && fade_st == 0 && dead_t < 0.0f) {
                     g_rush_clr = -1.0f;
-                    if (g_rush_i >= 3) { char t_[80]; int sec_ = (int)g_rush_time; snprintf(t_, sizeof t_, "BOSS RUSH COMPLETE  %d:%02d", sec_ / 60, sec_ % 60); g_rush = 0; say(t_); maplog("boss rush: complete%s%s", "", ""); }
-                    else { g_rush_i++; g_rush_heal = 1; if (g_rush_i == 3 && g_gh_dead) g_gh_redo = 1; snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; maplog("boss rush: back to the Dream%s%s", "", ""); }
+                    if (g_rush_i >= 5) { char t_[80]; int sec_ = (int)g_rush_time; snprintf(t_, sizeof t_, "BOSS RUSH COMPLETE  %d:%02d", sec_ / 60, sec_ % 60); g_rush = 0; rush_unsnap(); save_write(0); say(t_); maplog("boss rush: complete%s%s", "", ""); snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; }      // (after the Amygdala: the run is over and you wake in the Dream)
+                    else { g_rush_i++; g_rush_heal = 1; if (g_rush_i == 5) { g_gh_redo = 1; g_gh_dead = 0; } snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; maplog("boss rush: back to the Dream%s%s", "", ""); }
                 }
             }
             for (int i = 0; i < nLamps && dead_t < 0.0f && !flying; i++) {      // press X at a lantern to rest: refill, bring the enemies back, make it your respawn point
-                if (!lamp_gone(i) && pt_dist(pl.x, pl.y, lamps_[i].x, lamps_[i].y) < 1.6f && fabsf(pl.z - lamps_[i].z) < 1.8f) {
+                if (!lamp_gone(i) && !(rom_map() && BS.fight && BS.idx >= 0 && BS.idx < n_en && ENS[BS.idx].state != E_DEAD) && pt_dist(pl.x, pl.y, lamps_[i].x, lamps_[i].y) < 1.6f && fabsf(pl.z - lamps_[i].z) < 1.8f) {      // rom_lamp: the Byrgenwerth lantern works only while the Amygdala has not noticed you
                     g_prompt_x = 1;
                     if ((pressed & SCE_CTRL_CROSS) && !g_lamp_ui && !g_lamp_go) { g_lamp_light = !lamp_lit(i); g_lamp_ui = 1; g_lamp_sel = 0; g_lamp_i = i; g_lamp_dream = !strcasecmp(cur_map, "huntersdream"); store_near_r(0, 0, 0, 0); g_lamp_ws = !strcasecmp(cur_map, "huntersworkshop") && !g_store_set; snd_play(S_LANTERN, 0.5f); }      // (until a spot is chosen for the storage it is reached from this menu)
                     if (g_lamp_go && g_lamp_i == i) {
@@ -16770,6 +18690,7 @@ int main(void) {
                 }
             }
             if (hp <= 0.0f && dead_t < 0.0f) {                                 // died: YOU DIED screen, then back to the spawn
+                if (BS.fight) cine_slow(1.1f, 0.4f);      /* boss_cine: you fall slowly in front of him */
                 dead_t = 0.0f; hp = 0.0f; rally = 0.0f; lock_idx = -1; snd_play(S_PLAYER_DEATH, 1.0f); snd_play(S_YOUDIED, 1.0f); music_boss(0);
                 g_drop.active = 0;                                             // an unrecovered drop from before is lost for good
                 if (g_echoes > 0) { g_drop.active = 1; g_drop.amt = g_echoes; snprintf(g_drop.map, sizeof g_drop.map, "%s", cur_map); g_drop.x = pl.x; g_drop.y = pl.y; g_drop.z = pl.z; }
@@ -16784,6 +18705,9 @@ int main(void) {
                     hp = HP_MAX; rally = 0.0f; stam = STAM_MAX; picks_refresh(); mstate_forget_kills();
                     if (vials < 10) vials = 10; if (bullets < 10) bullets = 10; g_cur_vials = vials; g_cur_bullets = bullets;      // rest_min: dying leaves you with at least 10 vials and 10 bullets
                     if (en_ok) { lock_idx = -1; for (int i = 0; i < NUM_ENEMIES; i++) enemy_reset(i, spawnX, spawnY, spawnZ - 0.9f); }
+                    if (rl_map() && !(g_story & 4) && !g_rush) {      /* rom_death: no lantern waits in her lake, so you wake at the Dream's tombstone and must travel back (and fall) again */
+                        if (fade_st == 0 && file_exists_("ux0:data/bbpsx/level_huntersdream.bin")) { g_rl_wake = 1; snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; g_dream_seen = 1; save_write(0); maplog("respawn: Rom's lake - back to the Dream's tombstone%s%s", "", ""); }
+                    } else
                     if (g_rush) {      // boss_rush: dying wakes you at the Dream's tombstone, the same boss is next
                         if (strcasecmp(cur_map, "huntersdream")) { if (fade_st == 0 && file_exists_("ux0:data/bbpsx/level_huntersdream.bin")) { snprintf(pend_map, sizeof pend_map, "huntersdream"); pend_ld[0] = 0; pend_lamp = 0; fade_st = 1; } }
                         else { float gz_; pl.x = 0.877f; pl.y = -7.018f; pl.z = cw_floor(&world, 0.877f, -7.018f, 2.0f, &gz_) ? gz_ : 0.152f; pl.vz = 0; pl.grounded = 0; face = 3.4866f; yaw = face; pitch = -0.2f; }
@@ -16811,6 +18735,8 @@ int main(void) {
             g_pl_step = PL_STEP;
             for (int ei = 0; ei < nElv; ei++) { const Elevator *E = &elvs[ei];      // a parked lift: allow a slightly taller step onto the car
                 if (!E->dir && fabsf(pl.x - E->cx) < E->hx + 1.2f && fabsf(pl.y - E->cy) < E->hy + 1.2f && E->cur - pl.z > -0.3f && E->cur - pl.z < 1.1f) g_pl_step = 1.1f; }
+            g_pl_pend[0] += g_pl_pull[0]; g_pl_pend[1] += g_pl_pull[1]; g_pl_pull[0] = g_pl_pull[1] = 0.0f;
+            if (g_pl_pend[0] != 0.0f || g_pl_pend[1] != 0.0f) { float k_ = dt * 7.0f; if (k_ > 1.0f) k_ = 1.0f; float sx_ = g_pl_pend[0] * k_, sy_ = g_pl_pend[1] * k_; g_pl_pend[0] -= sx_; g_pl_pend[1] -= sy_; if (fabsf(g_pl_pend[0]) + fabsf(g_pl_pend[1]) < 0.003f) g_pl_pend[0] = g_pl_pend[1] = 0.0f; if (lad_i < 0 && hp > 0.0f) { float ox_ = pl.x, oy_ = pl.y; pl_update(&world, &pl, sx_, sy_, dt); g_cam_lag[0] -= (pl.x - ox_) * 0.8f; g_cam_lag[1] -= (pl.y - oy_) * 0.8f; } else g_pl_pend[0] = g_pl_pend[1] = 0.0f; }      /* gh_redo: dragged / shoved by Gehrman */
             if (lad_i < 0) pl_update(&world, &pl, mx * speed * dt, my * speed * dt, dt);
             {   // fall damage: from the speed he was falling at when he lands (a drop of more than FALL_SAFE metres hurts)
                 float jx_ = pl.x - fall_px, jy_ = pl.y - fall_py;
@@ -16826,7 +18752,7 @@ int main(void) {
                 fall_px = pl.x; fall_py = pl.y; fall_pz = pl.z;
                 if (!pl.grounded && lad_i < 0 && !flying) { if (pl.vz < fall_vz) fall_vz = pl.vz; if (pl.vz < -2.0f) fall_air = 1; }
                 else {
-                    if (fall_air && pl.grounded && lad_i < 0 && fall_vz < -1.0f) {
+                    if (fall_air && pl.grounded && lad_i < 0 && fall_vz < -1.0f && g_rl_drop != 1 && g_rl_dt <= 0.0f) {
                         float h_ = fall_vz * fall_vz / (2.0f * PL_GRAVITY);
                         if (fall_vz < -8.5f) { float v_ = -fall_vz / 16.0f; if (v_ > 1.0f) v_ = 1.0f; { int fcl_ = g_nftri ? floor_class_at(pl.x, pl.y, pl.z) : 0; if (fcl_ == 2 && g_snd_nv[S_SPLASH]) snd_play_lr(S_SPLASH, v_ + 0.3f, v_ + 0.3f, 0.95f); else snd_play_lr(fcl_ == 1 && g_snd_nv[S_STEP_WOOD] ? S_STEP_WOOD : S_STEP, v_, v_, 0.72f); } }       // landing
                         if (h_ > FALL_SAFE) { float d_ = h_ > FALL_LETHAL ? HP_MAX * 10.0f : HP_MAX * 0.999f * FALL_SCALE * fminf(1.0f, (h_ - FALL_SAFE) / (FALL_MAXNL - FALL_SAFE)) * fall_weight(); hp -= d_; rally += d_; rally_wait = RALLY_GRACE; g_shake = 0.35f + d_ * 0.01f; pending_hurt = 1; snd_play(S_PLAYER_HURT, 1.0f); }
@@ -16861,8 +18787,8 @@ int main(void) {
                 }
                 int want = a_cur; float ref = 0.0f;
                 if (dodge_t < 0.0f && attack_t < 0.0f && hurt_t < 0.0f) {
-                    if (!moving) want = (wpn_r() == 1 && cl_open && a_idle2h >= 0) ? a_idle2h : (a_idle >= 0 ? a_idle : a_cur);
-                    else if (sprinting) { want = a_sprint; ref = SPRINT_SPEED; }
+                    if (!moving) want = (w2h_open_ && a_idle2h >= 0) ? a_idle2h : (a_idle >= 0 ? a_idle : a_cur);
+                    else if (sprinting) { want = a_sprint; ref = SPRINT_SPEED; if (w2h_open_ && a_sprint2h >= 0) want = a_sprint2h; }
                     else {
                         int walk = speed == WALK_SPEED;
                         int sec = 0;
@@ -16871,10 +18797,11 @@ int main(void) {
                         if (want < 0) want = walk ? a_walk : a_run;           // missing directional anim: use the forward one
                         if (want < 0) want = a_run >= 0 ? a_run : a_cur;
                         ref = walk ? WALK_SPEED : RUN_SPEED;
-                        if (wpn_r() == 1 && cl_open && a_run2h >= 0) want = a_run2h;
+                        if (w2h_open_ && a_run2h >= 0) want = a_run2h;
+                        if (w2h_open_ && walk && a_walk2h >= 0) want = a_walk2h;      /* walking with the opened two-hander: its own walk, not the run played slowly */
                     }
                 }
-                if (!g_lay_ok && wpn_r() == 1 && xform_t >= 0.0f && a_2htr >= 0) { want = a_2htr; ref = 0.0f; }
+                if (!g_lay_ok && wr_axe_ && xform_t >= 0.0f && a_2htr >= 0) { want = a_2htr; ref = 0.0f; }
                 if (!g_lay_ok && chg_t >= 0.0f && chg_i >= 0 && hv_chg[chg_i] >= 0 && dodge_t < 0.0f && hurt_t < 0.0f) { want = hv_chg[chg_i]; ref = 0.0f; }
                 if (!g_lay_ok && heal_t >= 0.0f && a_heal >= 0 && dodge_t < 0.0f && attack_t < 0.0f && hurt_t < 0.0f) { want = a_heal; ref = 0.0f; }
                 if (gun_t >= 0.0f && a_shoot >= 0) { want = a_shoot; ref = 0.0f; }
@@ -16903,7 +18830,7 @@ int main(void) {
                 if (lad_cut) { blend = 0.0f; lad_cut = 0; }          // the pose height changed under him: no crossfade from the old pose
                 float rate = 1.0f;                                          // stride follows ground speed
                 if (ref > 0.0f) rate = speed / ref;
-                else if (wpn_r() == 1 && xform_t >= 0.0f && a_cur == a_2htr && a_2htr >= 0) rate = xform_to ? 1.3f : -1.3f;
+                else if (wr_axe_ && xform_t >= 0.0f && a_cur == a_2htr && a_2htr >= 0) rate = xform_to ? 1.3f : -1.3f;
                 else if (a_cur == atk_anim && atk_anim >= 0) { rate = (H.anim[atk_anim].nf / H.anim[atk_anim].fps) / attack_dur; if (atk_rev) rate = -rate; }
                 else if (a_cur == a_heal && a_heal >= 0 && heal_t >= 0.0f) rate = (H.anim[a_heal].nf / H.anim[a_heal].fps) / heal_dur * (heal_bt ? -1.0f : 1.0f);
                 else if (flame_on && a_cur == a_shoot && a_flame < 0) { float ln_ = H.anim[a_shoot].nf / H.anim[a_shoot].fps; rate = t_cur < ln_ * GUN_FIRE_AT ? GUN_SPEED : 0.0f; }      // no sprayer animations yet: hold the pistol's firing pose
@@ -16918,7 +18845,8 @@ int main(void) {
                 if (dead_t >= 0.0f && a_death >= 0 && a_cur == a_death) { float dd = H.anim[a_death].nf / H.anim[a_death].fps - 0.03f; if (t_cur > dd) t_cur = dd; }     // stay on the floor
                 if (blend > 0.0f) { blend -= dt / blend_len; if (blend < 0.0f) blend = 0.0f; }
                 // --- third-person camera: orbit around his head, pulled in front of walls
-                float tgt[3] = { pl.x, pl.y, pl.z + CAM_HEIGHT };
+                { float kd_ = dt * 5.0f; if (kd_ > 1.0f) kd_ = 1.0f; g_cam_lag[0] -= g_cam_lag[0] * kd_; g_cam_lag[1] -= g_cam_lag[1] * kd_; if (fabsf(g_cam_lag[0]) > 1.5f) g_cam_lag[0] = g_cam_lag[0] > 0 ? 1.5f : -1.5f; if (fabsf(g_cam_lag[1]) > 1.5f) g_cam_lag[1] = g_cam_lag[1] > 0 ? 1.5f : -1.5f; }
+                float tgt[3] = { pl.x + g_cam_lag[0], pl.y + g_cam_lag[1], pl.z + CAM_HEIGHT };
                 float dir[3] = { -fx, -fy, -fz }, th;
                 static float az_ = -1.0f; if (az_ < 0.0f) { az_ = 0.38f; FILE *zf_ = fopen("ux0:data/bbpsx/aimzoom.txt", "r"); if (zf_) { float v_; if (fscanf(zf_, "%f", &v_) == 1 && v_ >= 0.15f && v_ <= 1.0f) az_ = v_; fclose(zf_); } }      // aimzoom.txt: free-aim camera distance as a fraction of the normal one (default 0.38)
                 float cd_ = g_aim ? CAM_DIST * az_ : CAM_DIST;      // free_aim: closer, over the right shoulder
@@ -16957,7 +18885,7 @@ int main(void) {
                     xform_t += dt;
                     if (xform_t >= xform_dur) { xform_t = -1.0f; cl_open = xform_to; int idl = cl_open ? wa_oidle : wa_cidle; if (idl >= 0) { wa_cur = idl; wt = 0.0f; } else wt = 999.0f; }
                 }
-                if (wpn_r() == 1) H.wset = 0; else weapon_sample(wa_cur, wt);
+                if (wr_axe_) H.wset = 0; else weapon_sample(wa_cur, wt);
                 if (g_va_tr >= 0) {                                              // whip form with its own baked animation: shown for the whole transform
                     g_cane_open = xform_t >= 0.0f || cl_open;
                     if (g_cane_open && wpn_r() == 10) {
@@ -16969,12 +18897,13 @@ int main(void) {
             }
             if (g_cut_t >= 0.0f && g_cut_hd && g_hd_anim >= 0) { a_prev = -1; a_cur = g_hd_anim; t_cur = g_cut_t; blend = 0.0f; pl.x = g_hd_ox; pl.y = g_hd_oy; pl.z = g_hd_oz; face = g_hd_yaw; }      // hd_intro: you lie there and get up, in step with the camera
             else if (g_hd_rel) { g_hd_rel = 0; a_prev = -1; a_cur = a_idle >= 0 ? a_idle : 0; t_cur = 0.0f; blend = 0.0f; }
-            {   // the upper-body action layer (charge wind-up, the axe's grip): keeps the legs on walk / run
+            { int ml_sway_ = 0, ml_run_ = 0;   // the upper-body action layer (charge wind-up, the axe's grip): keeps the legs on walk / run
                 int act = -1;
-                if (chg_t >= 0.0f && chg_i >= 0 && hv_chg[chg_i] >= 0) act = hv_chg[chg_i]; else if (wpn_r() == 1 && xform_t >= 0.0f && a_2htr >= 0) act = a_2htr; else if ((toni_t >= 0.0f || heal_t >= 0.0f) && a_heal >= 0) act = a_heal;
+                if (chg_t >= 0.0f && chg_i >= 0 && hv_chg[chg_i] >= 0) act = hv_chg[chg_i]; else if (wr_axe_ && xform_t >= 0.0f && a_2htr >= 0) act = a_2htr; else if ((toni_t >= 0.0f || heal_t >= 0.0f) && a_heal >= 0) act = a_heal;
+                ml_sway_ = 0; ml_run_ = 0;
                 if (g_lay_ok && act >= 0) {
                     if (act != lay_act) { lay_act = act; t_act = ((act == a_2htr && !xform_to) || (act == a_heal && heal_bt)) ? (H.anim[act].nf - 1) / H.anim[act].fps : 0.0f; }
-                    else t_act += dt * (act == a_2htr ? (xform_to ? 1.3f : -1.3f) : ((act == a_heal && heal_bt) ? -1.0f : 1.0f));
+                    else { t_act += dt * (act == a_2htr ? (xform_to ? 1.3f : -1.3f) : ((act == a_heal && heal_bt) ? -1.0f : 1.0f)); if (ml_sway_) { float ln_ = H.anim[act].nf / H.anim[act].fps; t_act = (0.45f + 0.12f * sinf(g_glow_t * 2.2f)) * ln_; } }
                     if (t_act < 0.0f) t_act = 0.0f; lay_w += dt * 8.0f; if (lay_w > 1.0f) lay_w = 1.0f;
                 } else if (lay_w > 0.0f) { lay_w -= dt * 8.0f; if (lay_w <= 0.0f) { lay_w = 0.0f; lay_act = -1; } }
                 if (g_lay_ok && lay_act >= 0 && lay_w > 0.0f) {
@@ -16984,9 +18913,40 @@ int main(void) {
                     hunter_layer_mix(lay_loco);
                 } else hunter_pose(a_cur, t_cur, a_prev, t_prev, blend);
             }
-            g_axe2h = wpn_r() == 1 && cl_open;
+            {   /* moon_hold: the Moonlight Sword is held the way he holds it when walking, whatever he is doing between swings: the hand is turned about the palm so the blade points where it does in the walk (a little below level, a touch out to the right) */
+                static float mg_ = 0.0f, mh_[3] = { 14.0f, 0.0f, 1.0f }; static int mh_on_, mh_ld_;
+                if (!mh_ld_) { mh_ld_ = 1; FILE *f_ = fopen("ux0:data/bbpsx/moon_hold.txt", "r"); if (f_) { float a1_, a2_, a3_; if (fscanf(f_, "%f %f %f", &a1_, &a2_, &a3_) == 3) { mh_[0] = a1_; mh_[1] = a2_; mh_[2] = a3_; mh_on_ = 1; } fclose(f_); } { char t_[100]; snprintf(t_, sizeof t_, "moon_hold: %s, pitch %.0f yaw %.0f sway %.1f", mh_on_ ? "on" : "off (no moon_hold.txt)", mh_[0], mh_[1], mh_[2]); maplog("%s%s", t_, ""); } }      /* (off unless moon_hold.txt is on the card: the sword's own angle in the hand comes from weapons.bin) */
+                int mok_ = mh_on_ && hunter_ok && wpn_r() == 15 && !g_hide_wpn && !w2h_open_ && attack_t < 0.0f && hurt_t < 0.0f && dodge_t < 0.0f && xform_t < 0.0f && heal_t < 0.0f && toni_t < 0.0f && gun_t < 0.0f && visc_t < 0.0f && ix_t < 0.0f && dead_t < 0.0f && lad_i < 0 && pstag_t < 0.0f && chg_t < 0.0f && !flame_on;
+                { int rn_ = (a_cur == a_run); for (int k_ = 0; k_ < 8; k_++) if (a_cur == a_run8[k_]) rn_ = 1; if (rn_ && a_cur >= 0) mok_ = 0; }      /* (the run is left as it is) */
+                mg_ += ((mok_ ? 1.0f : 0.0f) - mg_) * fminf(1.0f, dt * 8.0f);
+                if (mg_ > 0.002f && H.wbone >= 0 && (uint32_t)H.wbone < H.nB) {
+                    float *M_ = H.pose + (size_t)H.wbone * 12;
+                    float hp_ = (mh_[0] + 7.0f * mh_[2] * sinf(g_glow_t * 3.4f)) * 0.0174533f, hy_ = (mh_[1] + 9.0f * mh_[2] * sinf(g_glow_t * 2.5f + 1.0f)) * 0.0174533f;
+                    const float tg_[3] = { cosf(hp_) * cosf(hy_), cosf(hp_) * sinf(hy_), sinf(hp_) };
+                    const float ab_[3] = { 0.98425f, -0.00953f, 0.17651f }, pr_[3] = { 0.08f, 0.46f, 0.975f };
+                    float cu_[3] = { M_[0]*ab_[0] + M_[1]*ab_[1] + M_[2]*ab_[2], M_[4]*ab_[0] + M_[5]*ab_[1] + M_[6]*ab_[2], M_[8]*ab_[0] + M_[9]*ab_[1] + M_[10]*ab_[2] };
+                    float kx_ = cu_[1]*tg_[2] - cu_[2]*tg_[1], ky_ = cu_[2]*tg_[0] - cu_[0]*tg_[2], kz_ = cu_[0]*tg_[1] - cu_[1]*tg_[0], ks_ = sqrtf(kx_*kx_ + ky_*ky_ + kz_*kz_), kc_ = cu_[0]*tg_[0] + cu_[1]*tg_[1] + cu_[2]*tg_[2];
+                    if (ks_ > 1e-4f) {
+                        float th_ = atan2f(ks_, kc_) * mg_, c_ = cosf(th_), sn_ = sinf(th_), nx_ = kx_ / ks_, ny_ = ky_ / ks_, nz_ = kz_ / ks_, v_ = 1.0f - c_;
+                        float Q_[9] = { c_ + nx_*nx_*v_, nx_*ny_*v_ - nz_*sn_, nx_*nz_*v_ + ny_*sn_,  ny_*nx_*v_ + nz_*sn_, c_ + ny_*ny_*v_, ny_*nz_*v_ - nx_*sn_,  nz_*nx_*v_ - ny_*sn_, nz_*ny_*v_ + nx_*sn_, c_ + nz_*nz_*v_ };
+                        float A_[9] = { M_[0], M_[1], M_[2], M_[4], M_[5], M_[6], M_[8], M_[9], M_[10] }, R_[9], t_[3] = { M_[3], M_[7], M_[11] };
+                        float p0_[3] = { A_[0]*pr_[0] + A_[1]*pr_[1] + A_[2]*pr_[2] + t_[0], A_[3]*pr_[0] + A_[4]*pr_[1] + A_[5]*pr_[2] + t_[1], A_[6]*pr_[0] + A_[7]*pr_[1] + A_[8]*pr_[2] + t_[2] };
+                        for (int r_ = 0; r_ < 3; r_++) for (int q_ = 0; q_ < 3; q_++) R_[r_*3+q_] = Q_[r_*3]*A_[q_] + Q_[r_*3+1]*A_[3+q_] + Q_[r_*3+2]*A_[6+q_];
+                        for (int r_ = 0; r_ < 3; r_++) { M_[r_*4] = R_[r_*3]; M_[r_*4+1] = R_[r_*3+1]; M_[r_*4+2] = R_[r_*3+2]; M_[r_*4+3] = p0_[r_] - (R_[r_*3]*pr_[0] + R_[r_*3+1]*pr_[1] + R_[r_*3+2]*pr_[2]); }
+                    }
+                }
+            }
+            g_axe2h = w2h_open_;
+            if (wpn_r() == 15 && hunter_ok && !g_hide_wpn) {      /* moonlight_sword: the blade glows (brighter in both hands), and the wave leaves it part way through the swing */
+                float A_[3], B_[3]; { static const float qa_[2][3] = { { 0.35f, 0.442f, 1.005f }, { 0.35f, 0.442f, 1.005f } }, qb_[2][3] = { { 1.10f, 0.435f, 1.120f }, { 1.25f, 0.436f, 1.145f } }; char_pt(&HUNT, pl.x, pl.y, pl.z, face, qa_[cl_open ? 1 : 0], A_); char_pt(&HUNT, pl.x, pl.y, pl.z, face, qb_[cl_open ? 1 : 0], B_); }      /* (the glow sits on the sword's own blade: the blade ends the rest of the code uses belong to another weapon) */
+                static float gt_[2] = { 0.6f, 0.6f }; static int gt_ld_; if (!gt_ld_) { gt_ld_ = 1; FILE *gf_ = fopen("ux0:data/bbpsx/moon_glow.txt", "r"); if (gf_) { float a1_, a2_; if (fscanf(gf_, "%f %f", &a1_, &a2_) == 2) { gt_[0] = a1_; gt_[1] = a2_; } fclose(gf_); } }      /* (moon_glow.txt: where along the blade the glow sits, 0 = guard, 1 = tip: one-handed, then two-handed) */
+                { float t_ = gt_[cl_open ? 1 : 0]; glow_add_w(A_[0] * (1.0f - t_) + B_[0] * t_, A_[1] * (1.0f - t_) + B_[1] * t_, A_[2] * (1.0f - t_) + B_[2] * t_, cl_open ? 1.1f + 0.1f * sinf(g_glow_t * 6.0f) : 0.5f, 1); }
+                if (g_ml_fire && cl_open && attack_t >= 0.0f && attack_t > attack_dur * 0.38f) { g_ml_fire = 0; g_ml_dmg = CLEAVER_DMG_OPEN * wpn_rmult() * 0.9f; thr_launch(6, &pl, face, lock_idx); snd_play_lr(S_W_TONI_ACT, 0.7f, 0.7f, 1.45f); g_nx_dly = (int)(SND_RATE * 0.05f); snd_play_lr(S_SWING_HEAVY, 0.6f, 0.6f, 0.7f);      /* own_sounds: a bright ring over a slow, heavy sweep */ maplog("moonlight: wave thrown%s%s", "", ""); }
+            }
+            if (attack_t < 0.0f && since_atk > 0.6f) g_ml_fire = 0;
             axe_slide(dt);
-            hunter_skin();
+            { float tg_ = (wpn_r() == 15 && w2h_open_ && hunter_ok && heal_t < 0.0f) ? 1.0f : 0.0f; g_ik2h_w += (tg_ - g_ik2h_w) * fminf(1.0f, dt * 9.0f); if (g_ik2h_w < 0.01f) g_ik2h_w = 0.0f; if (tg_ > 0.5f && g_ik2h_w > 0.99f) g_ik2h_w = 1.0f; g_ik2h = g_ik2h_w > 0.0f ? 1 : 0; }      /* moon_heal: drinking a vial, the left hand lets go of the hilt (the normal heal animation plays) and takes it again after, a fade in each direction */      /* two-handed Moonlight Sword: the left hand goes to the hilt */
+            hunter_skin(); g_ik2h = 0;
             if (!flying) { cb_gate_update(&pl, dt); cb_gate_wall(&pl); gb_gate_update(&pl, dt); gb_gate_wall(&pl); gh_gate_update(&pl, dt); gh_gate_wall(&pl); }      // the Cleric Beast's fog gate (this map has no enemies yet, so it can't live in the enemy block)
             if (g_nbrk && !flying && dead_t < 0.0f) {      // breakables: a swing, a roll or a punch breaks barrels
                 if (attack_t >= 0.0f) { float f_ = attack_t / attack_dur; if (f_ > 0.2f && f_ < 0.75f) { if (wpn_r() < 0 || wpn_r() == 3) brk_point(pl.x + cosf(face) * 0.9f, pl.y + sinf(face) * 0.9f, pl.z + 0.9f, 0.35f, pl.x, pl.y); else { float A_[3], B_[3]; char_blade(&HUNT, pl.x, pl.y, pl.z, face, A_, B_); brk_swing(A_, B_, pl.x, pl.y); } } }
@@ -16996,13 +18956,15 @@ int main(void) {
             if (en_ok && !flying) {
                 boss_wall(&pl);
                 int invuln = hurt_t >= 0.0f || visc_t >= 0.0f || ix_t >= 0.0f || (dodge_t >= 0.0f && dodge_t < dodge_dur * 0.65f);      // ix_t: opening a door / pulling a switch plays out in full, nothing can interrupt it
+                if (spin_on && attack_t >= 0.0f && a_2hspin >= 0) { int rots_ = (int)(attack_dur / 0.6f + 0.5f); if (rots_ < 1) rots_ = 1; int seg_ = (int)(attack_t / attack_dur * rots_); if (seg_ >= rots_) seg_ = rots_ - 1; if (seg_ != spin_seg) { spin_seg = seg_; memset(spin_hit, 0, sizeof spin_hit); } }      /* spin_rot: the hunter's own spin animation turns several times: every turn hits again (about one per 0.6 s of the animation) */
                 for (int i = 0; i < NUM_ENEMIES; i++) {
                     ECUR = &ENS[i];
                     if (spin_on && attack_t >= 0.0f && !spin_hit[i] && EN.state != E_DEAD) {          // the axe's spin: everything within reach all the way round
                         float f = attack_t / attack_dur, ex = EN.p.x - pl.x, ey = EN.p.y - pl.y, dd = sqrtf(ex * ex + ey * ey);
-                        if (f > 0.15f && f < 0.85f && dd < 2.9f + EN.hrad && EN.p.z + EN.zhi > pl.z - 0.3f && EN.p.z + EN.zlo < pl.z + 2.2f) {
+                        int sp_in_ = 0; if ((a_2hspin >= 0) ? (f > 0.04f && f < 0.97f) : (f > 0.15f && f < 0.85f)) { float SA_[3], SB_[3]; char_blade(&HUNT, pl.x, pl.y, pl.z, face, SA_, SB_); sp_in_ = blade_hits_h(SA_, SB_, EN.p.x, EN.p.y, EN.p.z, EN.hrad, EN.zlo, EN.zhi) || blade_hits_lockpts(SA_, SB_, i) || moon_blade_hit(SA_, SB_); }      /* spin_blade: only what the blade itself passes through is hit (it used to be everything within 2.9 m all the way round) */
+                        if (sp_in_) {
                             spin_hit[i] = 1; last_hit = i;
-                            float dmg_ = CLEAVER_DMG_OPEN * 0.8f * wpn_rmult(); enemy_hurt(dmg_); paper_bonus(dmg_);
+                            float dmg_ = CLEAVER_DMG_OPEN * (wpn_r() == 15 ? 1.5f : 1.2f) * wpn_rmult(); enemy_hurt(dmg_); paper_bonus(dmg_);      /* (each enemy can only be hit once a turn, so each hit lands harder: 0.8 -> 1.2, the Moonlight Sword 1.5) */
                             { float g_ = dmg_ * RALLY_RATIO; if (g_ > rally) g_ = rally; hp += g_; rally -= g_; rally_ping_v(g_, 0.25f); }
                             if (EN.type != 4 && EN.state != E_DEAD && dd > 0.01f) { EN.vx = ex / dd * 7.0f; EN.vy = ey / dd * 7.0f; EN.state = E_HURT; EN.st = 0.0f; }     // smaller enemies are knocked back
                         }
@@ -17015,20 +18977,23 @@ int main(void) {
                             int fist_ = (wpn_r() < 0 || wpn_r() == 3); int fist_hit = 0;
                             if (fist_) { float ex_ = EN.p.x - pl.x, ey_ = EN.p.y - pl.y, dd_ = sqrtf(ex_ * ex_ + ey_ * ey_); fist_hit = dd_ < 1.5f + EN.hrad && fabsf(wrap_pi(atan2f(ey_, ex_) - face)) < 1.0f && EN.p.z + EN.zhi > pl.z - 0.2f && EN.p.z + EN.zlo < pl.z + 2.0f; }
                             else char_blade(&HUNT, pl.x, pl.y, pl.z, face, A, B);
-                            if (fist_ ? fist_hit : (blade_hits_h(A, B, EN.p.x, EN.p.y, EN.p.z, EN.hrad, EN.zlo, EN.zhi) || blade_hits_lockpts(A, B, i))) { swing_hit = 1; last_hit = i; enemy_hurt((cl_open && (wpn_r_xform() || wpn_r() == 1) ? CLEAVER_DMG_OPEN : CLEAVER_DMG) * wpn_rmult() * atk_mult); paper_bonus((cl_open && (wpn_r_xform() || wpn_r() == 1) ? CLEAVER_DMG_OPEN : CLEAVER_DMG) * wpn_rmult() * atk_mult); if (atk_mult > 1.2f) { g_shake = 0.3f; if (EN.type != 4 && !EN_NPC(EN.type) && EN.state != E_DEAD && EN.hp > 0.0f && fabsf(wrap_pi(EN.face - atan2f(pl.y - EN.p.y, pl.x - EN.p.x))) > 2.0f) { enemy_stagger(); snd_play(S_PARRY, 0.7f); g_shake = 0.4f; } } { float g_ = (cl_open && (wpn_r_xform() || wpn_r() == 1) ? CLEAVER_DMG_OPEN : CLEAVER_DMG) * wpn_rmult() * atk_mult * RALLY_RATIO; if (g_ > rally) g_ = rally; hp += g_; rally -= g_; rally_ping_v(g_, 0.25f); /* quiet rally: hitting back wins health back */ } }
+                            if (fist_ ? fist_hit : (blade_hits_h(A, B, EN.p.x, EN.p.y, EN.p.z, EN.hrad, EN.zlo, EN.zhi) || blade_hits_lockpts(A, B, i) || moon_blade_hit(A, B))) { swing_hit = 1; last_hit = i; if (!fist_) { g_lb_pt[0] = A[0] * 0.3f + B[0] * 0.7f; g_lb_pt[1] = A[1] * 0.3f + B[1] * 0.7f; g_lb_pt[2] = A[2] * 0.3f + B[2] * 0.7f; g_lb_pt_ok = 1; } /* limb_break: where the blade was */ enemy_hurt((cl_open && (wpn_r_xform() || wpn_r() == 1) ? CLEAVER_DMG_OPEN : CLEAVER_DMG) * wpn_rmult() * atk_mult); paper_bonus((cl_open && (wpn_r_xform() || wpn_r() == 1) ? CLEAVER_DMG_OPEN : CLEAVER_DMG) * wpn_rmult() * atk_mult); if (atk_mult > 1.2f) { g_shake = 0.3f; if (EN.type != 4 && !EN_NPC(EN.type) && EN.state != E_DEAD && EN.hp > 0.0f && fabsf(wrap_pi(EN.face - atan2f(pl.y - EN.p.y, pl.x - EN.p.x))) > 2.0f) { enemy_stagger(); snd_play(S_PARRY, 0.7f); g_shake = 0.4f; } } { float g_ = (cl_open && (wpn_r_xform() || wpn_r() == 1) ? CLEAVER_DMG_OPEN : CLEAVER_DMG) * wpn_rmult() * atk_mult * RALLY_RATIO; if (g_ > rally) g_ = rally; hp += g_; rally -= g_; rally_ping_v(g_, 0.25f); /* quiet rally: hitting back wins health back */ } }
                         }
                     }
                     g_pl_windup = (attack_t >= 0.0f && attack_t < attack_dur * 0.85f);       // swinging only: he can't stagger you while you drink g_pl_stagged = pstag_t >= 0.0f;
                     uint64_t pe0_ = sceKernelGetProcessTimeWide();
                     float d = enemy_update(dt, &pl, invuln) * (g_ng > 0 && !EN_NPC(EN.type) ? ng_dmm() : 1.0f); if (i == BS.idx && EN.type == 4) { bs_elem_tick(dt); d *= bs_elem_dmg(); } if (EN.type == 17 && EN.wch) wch_follow(); if (EN.type == 4 && gb_map() && i == BS.idx) { gb_bounce(dt, &pl); gb_table_follow(); }
                     if (EN_NPC(EN.type) && EN.type != 24 && !EN.hostile && EN.leave != 3 && !(EN.type == 23 && EN.leave == 0) && fabsf(pl.z - EN.p.z) < 1.5f) { float ex_ = pl.x - EN.p.x, ey_ = pl.y - EN.p.y, d_ = hypotf(ex_, ey_); if (d_ < 0.6f && d_ > 0.001f) { pl.x = EN.p.x + ex_ / d_ * 0.6f; pl.y = EN.p.y + ey_ / d_ * 0.6f; } }      // eileen_npc: solid, you cannot walk through her
-                    g_prof[1] += (double)(sceKernelGetProcessTimeWide() - pe0_);
+                    { double dd_ = (double)(sceKernelGetProcessTimeWide() - pe0_); g_prof[1] += dd_; if (rl_map()) g_prof_rm[(i == BS.idx) ? 0 : 1] += dd_; }
                     { static float sk_t[MAX_ENEMIES], sk_x[MAX_ENEMIES], sk_y[MAX_ENEMIES];      /* stuck_brk: a creature chasing you that stops getting anywhere because a barrel / crate is in the way smashes it */
                       if (i < MAX_ENEMIES && g_nbrk && EN.state == E_CHASE && !EN_NPC(EN.type) && EN.type != 4) {
                         sk_t[i] += dt;
                         if (sk_t[i] >= 0.7f) { float mv_ = hypotf(EN.p.x - sk_x[i], EN.p.y - sk_y[i]), pd_ = hypotf(pl.x - EN.p.x, pl.y - EN.p.y); sk_x[i] = EN.p.x; sk_y[i] = EN.p.y; sk_t[i] = 0.0f;
                             if (mv_ < 0.3f && pd_ > 1.8f) brk_point(EN.p.x + cosf(EN.face) * 0.9f, EN.p.y + sinf(EN.face) * 0.9f, EN.p.z + 0.7f, 1.3f, EN.p.x, EN.p.y); }
                       } else if (i < MAX_ENEMIES) { sk_t[i] = 0.0f; sk_x[i] = EN.p.x; sk_y[i] = EN.p.y; } }
+                    if (g_mp_drain_req) { g_mp_drain_req = 0; if (hp > 1.0f) { cine_slow(0.7f, 0.4f); rally += hp - 1.0f; hp = 1.0f; rally_wait = 8.0f; g_flash = 1.0f; snd_play(S_PLAYER_HURT, 0.8f); } }      /* real_feel: the blood drain leaves 1 health; the rest stays winnable back for 8 s */
+                    if (g_burn_dmg > 0.0f) { hp -= g_burn_dmg; rally += g_burn_dmg; rally_wait = RALLY_GRACE; snd_play(S_PLAYER_HURT, 0.5f); g_burn_dmg = 0.0f; }      // burning ground: no flinch
+                    if (d >= 40.0f && BS.fight) { cine_slow(0.16f, 0.18f); if (g_shake < 0.7f) g_shake = 0.7f; }      /* boss_cine: a heavy blow from a boss stops the world for a moment */
                     if (d > 0.0f) { hp -= d; pending_hurt = 1; rally += d; rally_wait = RALLY_GRACE; blood_hit(pl.x, pl.y, pl.z + 1.0f, EN.p.x, EN.p.y, d, 1.1f); stain_add(4, 0.4f, 1.45f); snd_play(S_PLAYER_HURT, 1.0f);
                         if (g_pl_stag_req) {                           // his shot caught him mid-swing: he's staggered
                             g_pl_stag_req = 0; pending_hurt = 0; g_pstag_cd = PSTAG_COOLDOWN; attack_t = gun_t = heal_t = -1.0f; swing_hit = 1;
@@ -17051,7 +19016,8 @@ int main(void) {
                     if (EN.type == 0 && !EN.fixed && EN.state == E_DEAD && EN.st > 6.0f) enemy_reset(i, pl.x, pl.y, pl.z);       // creatures stay dead until D-pad up
                     if (EN.state != E_DEAD) {                       // solid bodies: push the two apart (the level's walls fix any overlap next frame)
                         float bx = pl.x - EN.p.x, by = pl.y - EN.p.y, bd = sqrtf(bx * bx + by * by);
-                        if (bd < EN.bod && fabsf(pl.z - EN.p.z) < 1.5f) {
+                        if (moon_shape_on()) { float ox_ = pl.x, oy_ = pl.y; moon_push(&pl.x, &pl.y, pl.z); g_cam_lag[0] -= (pl.x - ox_) * 0.8f; g_cam_lag[1] -= (pl.y - oy_) * 0.8f; }      /* moon_shape */
+                        else if (bd < EN.bod && fabsf(pl.z - EN.p.z) < 1.5f) {
                             if (bd < 1e-3f) { bx = 1.0f; by = 0.0f; bd = 1.0f; }
                             float push = (EN.bod - bd) * 0.5f / bd;
                             pl.x += bx * push; pl.y += by * push; EN.p.x -= bx * push; EN.p.y -= by * push;
@@ -17078,14 +19044,14 @@ int main(void) {
             mat_mul(pv, projM, viewM);
             glUseProgram(ps1.prog);
             glUniform1i(ps1.tex, 0);
-            glUniform4f(ps1.fogColor, 0.07f + 0.15f * g_dream_day, 0.06f + 0.19f * g_dream_day, 0.09f + 0.30f * g_dream_day, (g_sky_n > 0 && g_fog_on && !g_ps1_dith) ? 1.0f : 0.0f);      // fog_sky: with a sky, distant things fade out into it
+            glUniform4f(ps1.fogColor, FOGC(0), FOGC(1), FOGC(2), (g_sky_n > 0 && g_fog_on && !g_ps1_dith) ? 1.0f : 0.0f);      // fog_sky: with a sky, distant things fade out into it
             if (g_sky_n > 0 && g_fog_on && !g_ps1_dith) { glEnable(GL_BLEND);      /* fog_noblend: the dithered fog never needs blending (it was the cost of fog + shader on a sky map) */ glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); } else glDisable(GL_BLEND);
             glUniform2f(ps1.fogRange, (g_fog_on && !g_nohaze) ? FOG_START : 0.0f, (g_fog_on && !g_nohaze) ? 1.0f / (FOGV_END - FOG_START) : 0.0f);
             glUniform2f(ps1.snapHalf, snap_on ? SNAP_W * 0.5f : 0.0f, snap_on ? SNAP_H * 0.5f : 0.0f);
             glUniform1f(ps1.alphaCut, alpha_on ? 0.33f : -1.0f);
             glEnableVertexAttribArray(0);
             glEnableVertexAttribArray(1);
-            if (g_sky_n > 0 && !g_crackdbg) {      // sky_export
+            if (!g_crackdbg) {      /* sky_export; also entered with no sky parts, so every map gets the moon (the walls hide it as they should) */
                 static float skyP[16]; static int skyP_ok = 0;
                 if (!skyP_ok) { float n_ = 0.5f, t_ = n_ * tanf(35.0f * 3.14159265f / 180.0f), r_ = t_ * ((float)RES_W / (float)RES_H); frustum_mat(skyP, -r_, r_, -t_, t_, n_, 60000.0f); skyP_ok = 1; }
                 float sw[16]; mat_mul(sw, skyP, viewM);
@@ -17095,8 +19061,19 @@ int main(void) {
                 for (int si = 0; si < g_sky_n; si++) {
                     glBindTexture(GL_TEXTURE_2D, (g_sky[si].tex2 && g_dream_day > 0.5f) ? g_sky[si].tex2 : g_sky[si].tex); glBindBuffer(GL_ARRAY_BUFFER, g_sky[si].vbo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_sky[si].ibo);
                     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
+                    { float tm_[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, ex - g_sky[si].cx, ey - g_sky[si].cy, ez - g_sky[si].cz, 1 }, sw2_[16]; mat_mul(sw2_, sw, tm_); glUniformMatrix4fv(ps1.wvp, 1, GL_FALSE, sw2_); }      /* sky_lock: the sky follows the eye, so it only turns with the view (like the moon) */
                     glDrawElements(GL_TRIANGLES, g_sky[si].ni, GL_UNSIGNED_SHORT, 0);
                 }
+                glUniformMatrix4fv(ps1.wvp, 1, GL_FALSE, sw);
+                { { static float sa_ = -1000.0f; if (sa_ < -999.0f) { sa_ = 270.0f; FILE *sf_ = fopen("ux0:data/bbpsx/moon_blood_az.txt", "r"); if (sf_) { float v_; if (fscanf(sf_, "%f", &v_) == 1) sa_ = v_; fclose(sf_); } } g_moon_az = sa_; } }      /* every stage, the Gascoigne arena included: directly south (270 degrees = down the map's -y axis; moon_blood_az.txt on the card sets another bearing) */
+                moon_draw(ex, ey, ez, (g_sky_n > 0 && g_fog_on && !g_ps1_dith));      /* moon: one fixed place in every sky */
+                for (int si = 0; si < g_sky_n; si++) if (g_sky[si].sil) {      /* sky_sil: the building shapes again, over the moon, so it shows behind them */
+                    glBindTexture(GL_TEXTURE_2D, g_sky[si].sil); glBindBuffer(GL_ARRAY_BUFFER, g_sky[si].vbo); glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_sky[si].ibo);
+                    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 20, (void *)0); glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 20, (void *)12);
+                    { float tm_[16] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, ex - g_sky[si].cx, ey - g_sky[si].cy, ez - g_sky[si].cz, 1 }, sw2_[16]; mat_mul(sw2_, sw, tm_); glUniformMatrix4fv(ps1.wvp, 1, GL_FALSE, sw2_); }
+                    glUniform1f(ps1.alphaCut, 0.5f); glDrawElements(GL_TRIANGLES, g_sky[si].ni, GL_UNSIGNED_SHORT, 0); glUniform1f(ps1.alphaCut, -1.0f);
+                }
+                glUniformMatrix4fv(ps1.wvp, 1, GL_FALSE, sw);
                 glEnable(GL_DEPTH_TEST); glDepthMask(GL_TRUE);
                 glUniform2f(ps1.fogRange, (g_fog_on && !g_nohaze) ? FOG_START : 0.0f, (g_fog_on && !g_nohaze) ? 1.0f / (FOGV_END - FOG_START) : 0.0f);
                 glUniform2f(ps1.snapHalf, snap_on ? SNAP_W * 0.5f : 0.0f, snap_on ? SNAP_H * 0.5f : 0.0f);
@@ -17108,7 +19085,7 @@ int main(void) {
                 int lit_on = 0; if (lit_ok && g_lit_user) lit_on = lit_gather(ex, ey, ez) > 0 || g_lit_amb != 1.0f;      /* lit_steady: with the ambient changed the lit look must stay even when no light is near */ const PS1Shader *PA = &ps1, *PO = &ps1o;
                 if (lit_on) for (int k_ = 0; k_ < 2; k_++) {      // light_shader: the lit programs get this frame's uniforms and lights
                     const PS1Shader *P_ = k_ ? &ps1oL : &ps1L; glUseProgram(P_->prog); glUniform1i(P_->tex, 0); glUniformMatrix4fv(P_->wvp, 1, GL_FALSE, pv);
-                    glUniform4f(P_->fogColor, 0.07f + 0.15f * g_dream_day, 0.06f + 0.19f * g_dream_day, 0.09f + 0.30f * g_dream_day, 0.0f);      // the lit world fades into the same fog colour as the doors and people
+                    glUniform4f(P_->fogColor, FOGC(0), FOGC(1), FOGC(2), 0.0f);      // the lit world fades into the same fog colour as the doors and people
                     glUniform2f(P_->fogRange, (g_fog_on && !g_nohaze) ? FOG_START : 0.0f, (g_fog_on && !g_nohaze) ? 1.0f / (FOGV_END - FOG_START) : 0.0f);
                     glUniform2f(P_->snapHalf, snap_on ? SNAP_W * 0.5f : 0.0f, snap_on ? SNAP_H * 0.5f : 0.0f);
                     if (!k_) glUniform1f(P_->alphaCut, alpha_on ? 0.33f : -1.0f);
@@ -17119,7 +19096,7 @@ int main(void) {
                 glUniformMatrix4fv(ps1.wvp, 1, GL_FALSE, pv);
                 if (ps1o_ok) {      // opaque_fast: the cheap program gets the same per-frame uniforms
                     glUseProgram(ps1o.prog); glUniform1i(ps1o.tex, 0); glUniformMatrix4fv(ps1o.wvp, 1, GL_FALSE, pv);
-                    glUniform4f(ps1o.fogColor, 0.07f + 0.15f * g_dream_day, 0.06f + 0.19f * g_dream_day, 0.09f + 0.30f * g_dream_day, (g_sky_n > 0 && g_fog_on && !g_ps1_dith) ? 1.0f : 0.0f);
+                    glUniform4f(ps1o.fogColor, FOGC(0), FOGC(1), FOGC(2), (g_sky_n > 0 && g_fog_on && !g_ps1_dith) ? 1.0f : 0.0f);
                     glUniform2f(ps1o.fogRange, (g_fog_on && !g_nohaze) ? FOG_START : 0.0f, (g_fog_on && !g_nohaze) ? 1.0f / (FOGV_END - FOG_START) : 0.0f);
                     glUniform2f(ps1o.snapHalf, snap_on ? SNAP_W * 0.5f : 0.0f, snap_on ? SNAP_H * 0.5f : 0.0f);
                     glUseProgram(ps1.prog);
@@ -17244,6 +19221,7 @@ int main(void) {
             if (BS.fog > 0.02f) { g_fogsheet_h = BOSS_WALL_H; boss_fog_draw(&ps1, pv, tsec); g_fogsheet_h = 3.4f; }                     // the boss's fog gate
             if (g_cb_fog > 0.02f) { g_fogsheet_h = g_cb_dh; fog_sheet_draw(&ps1, pv, tsec, g_cb_fog, CB_WALL_X, CB_WALL_Y, CB_WALL_HW, g_cb_z); g_fogsheet_h = 3.4f; }      // the Cleric Beast's fog gate
             if (g_gb_fog > 0.02f) { g_fogsheet_h = g_gb_dh; fog_sheet_draw(&ps1, pv, tsec, g_gb_fog, GB_WALL_X, GB_WALL_Y, g_gb_dhw, g_gb_z); g_fogsheet_h = 3.4f; }      // gilbert_fog
+            romfog_draw(&ps1, pv, tsec, ex, ey, (g_sky_n > 0 && g_fog_on && !g_ps1_dith) ? 1.0f : 0.0f);      // rom_fog: the mist in the Rom arena
             thr_draw(&ps1, pv, fx, fy);      // thrown pebbles / molotovs
             brk_draw(&ps1, pv, fx, fy);      // wood chips from broken barrels
             if (g_ldr_tint) { if (flying) ldr_tint_draw(&ps1, pv, fly_x, fly_y, fly_z - PL_EYE); else ldr_tint_draw(&ps1, pv, pl.x, pl.y, pl.z); }      // door_tint
@@ -17259,19 +19237,20 @@ int main(void) {
             blood_draw(&ps1, pv, fx, fy);
             if (hunter_ok && !g_mono) { draw_hunter_ps1(&ps1, pv, pl.x, pl.y, pl.z, face); stain_draw_model(&ps1, pv, pl.x, pl.y, pl.z, face, alpha_on ? 0.33f : -1.0f); }      // blood sticks to his model
             if (g_cfx_t > 0.0f) { g_cfx_t -= g_fire_dt; if (hunter_ok && dead_t < 0.0f && !g_hide_wpn) { float A_[3], B_[3]; char_blade(&HUNT, pl.x, pl.y, pl.z, face, A_, B_);
-                glow_add_c((A_[0] + B_[0]) * 0.5f, (A_[1] + B_[1]) * 0.5f, (A_[2] + B_[2]) * 0.5f, 1.5f, 2);
+                glow_add_w((A_[0] + B_[0]) * 0.5f, (A_[1] + B_[1]) * 0.5f, (A_[2] + B_[2]) * 0.5f, 1.5f, 2);
                 for (int k_ = 0; k_ < 3; k_++) { float u_ = frand(); soul_ember(A_[0] + (B_[0] - A_[0]) * u_, A_[1] + (B_[1] - A_[1]) * u_, A_[2] + (B_[2] - A_[2]) * u_); } } }      // charge_fx
             if (hunter_ok && dead_t < 0.0f && !g_hide_wpn && g_toni_t > 0.0f && wpn_r() == 11) { for (uint32_t si = 0; si < HUNT.nS; si++) if (HUNT.sec[si].flag == 27) { spark_char_emit(&HUNT, (int)si, pl.x, pl.y, pl.z, face); break; } }      // lightning crackles around the charged mace
             if (hunter_ok && dead_t < 0.0f && !g_hide_wpn && g_paper_t > 0.0f && wpn_r() == g_paper_w) {      /* paper: the blade throws fire / sparks while it swings, and only a little in between */
                 float A_[3], B_[3]; char_blade(&HUNT, pl.x, pl.y, pl.z, face, A_, B_); int sw_ = attack_t >= 0.0f; float rt_ = sw_ ? 70.0f : 7.0f;
                 if (g_paper_w == 4) paper_both(&HUNT, pl.x, pl.y, pl.z, face, g_paper_kind, sw_);      // both Blades of Mercy
                 else if (frand() < rt_ * g_fire_dt) { float u_ = frand(); float px_ = A_[0] + (B_[0] - A_[0]) * u_, py_ = A_[1] + (B_[1] - A_[1]) * u_, pz_ = A_[2] + (B_[2] - A_[2]) * u_;
-                    if (g_paper_kind == 1) { fire_spawn_short(px_, py_, pz_, 0.22f); if (frand() < 0.4f) ember_spawn(px_, py_, pz_, 0.12f); if (sw_) glow_add(px_, py_, pz_, 1.2f); }
-                    else { spark_spawn(px_, py_, pz_, 0.2f); if (sw_) glow_add_c(px_, py_, pz_, 1.2f, 1); } } }
+                    if (g_paper_kind == 1) { fire_spawn_short(px_, py_, pz_, 0.22f); if (frand() < 0.4f) ember_spawn(px_, py_, pz_, 0.12f); if (sw_) glow_add_w(px_, py_, pz_, 1.2f, 0); }
+                    else { spark_spawn(px_, py_, pz_, 0.2f); if (sw_) glow_add_w(px_, py_, pz_, 1.2f, 1); } } }
             { static int tl_w = -1; if (tl_w != wpn_l()) { HUNT.tipL = 0; tl_w = wpn_l(); } }
             if (hunter_ok && dead_t < 0.0f && wpn_l() == 9 && lad_i < 0 && !g_hide_wpn) { for (uint32_t si = 0; si < HUNT.nS; si++) if (HUNT.sec[si].flag == 25) { fire_char_emit(&HUNT, (int)si, 1, pl.x, pl.y, pl.z, face); break; } }      // the torch in his hand burns
-            if (en_ok) for (int i = 0; i < NUM_ENEMIES; i++) { ECUR = &ENS[i]; CUR = &ENEMY; if (EN.type == 4 && i == BS.idx && BS.gone) { CUR = &HUNT; continue; } if (!(EN.type == 20 && EN.leave == 3) && !(EN.type == 23 && EN.leave == 0) && !(g_cb_hide && cb_map() && EN.type == 4 && i == BS.idx) && (fabsf(EN.p.x - pl.x) + fabsf(EN.p.y - pl.y)) < FOG_END + 8.0f && (en_in_view(EN.p.x, EN.p.y, EN.p.z) || (fabsf(EN.p.x - pl.x) + fabsf(EN.p.y - pl.y)) < 6.0f)) draw_hunter_ps1_part(&ps1, pv, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off, (EN.type == 4 && i == BS.idx && BS.sub == SUB_DEAD) ? BS.vis : (EN.type == 20 ? EN.lv_vis : 1.0f)); if (EN.type == 4 && i == BS.idx && gh_map() && g_gh_torch && EN.state != E_DEAD) { int bs_ = -1; uint32_t bc_ = 0; for (uint32_t si = 0; si < ENEMY.nS; si++) { const HSection *S_ = &ENEMY.sec[si]; if (S_->count > bc_ && S_->flag < 2 && ENEMY.vb[ENEMY.idx[S_->start] * 4 + 3] == 1) { bs_ = (int)si; bc_ = S_->count; } } if (bs_ >= 0) { g_fce_axe = 1; fire_char_emit(&ENEMY, bs_, 0, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off); g_fce_axe = 0; } }      // gh_axefire: from half health the head of his axe burns (the biggest piece of the axe that moves when it unfolds)
+            if (en_ok) for (int i = 0; i < NUM_ENEMIES; i++) { ECUR = &ENS[i]; CUR = &ENEMY; if (EN.type == 4 && i == BS.idx && BS.gone) { CUR = &HUNT; continue; } if (!(EN.type == 20 && EN.leave == 3) && !(EN.type == 23 && EN.leave == 0) && !(EN.type == 13 && EN.state == E_DEAD && EN.st > 2.3f && rl_map()) && !(g_cb_hide && cb_map() && EN.type == 4 && i == BS.idx) && (fabsf(EN.p.x - pl.x) + fabsf(EN.p.y - pl.y)) < FOG_END + 8.0f && (en_in_view(EN.p.x, EN.p.y, EN.p.z) || (fabsf(EN.p.x - pl.x) + fabsf(EN.p.y - pl.y)) < 6.0f)) draw_hunter_ps1_part(&ps1, pv, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off, (EN.type == 4 && i == BS.idx && BS.sub == SUB_DEAD) ? BS.vis : ((EN.type == 4 && i == BS.idx && g_rm_vis < 0.999f) ? g_rm_vis : (EN.type == 20 ? EN.lv_vis : ((EN.type == 13 && EN.state == E_DEAD && rl_map()) ? (EN.st < 1.0f ? 1.0f : (EN.st > 2.3f ? 0.0f : 1.0f - (EN.st - 1.0f) / 1.3f)) : 1.0f)))); if (EN.type == 4 && i == BS.idx && g_ast_n + g_ast_want > 0 && rom_map() && !moon_map() && !rl_map()) ast_draw(&ps1, pv, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off, alpha_on ? 0.33f : -1.0f); if (EN.type == 4 && i == BS.idx && gh_map() && g_gh_torch && EN.state != E_DEAD) { int bs_ = -1; uint32_t bc_ = 0; for (uint32_t si = 0; si < ENEMY.nS; si++) { const HSection *S_ = &ENEMY.sec[si]; if (S_->count > bc_ && S_->flag < 2 && ENEMY.vb[ENEMY.idx[S_->start] * 4 + 3] == 1) { bs_ = (int)si; bc_ = S_->count; } } if (bs_ >= 0) { g_fce_axe = 1; fire_char_emit(&ENEMY, bs_, 0, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off); g_fce_axe = 0; } }      // gh_axefire: from half health the head of his axe burns (the biggest piece of the axe that moves when it unfolds)
                         if (EN.state != E_DEAD && EN.type == 10 && ENEMY.wsec_i >= 0) fire_char_emit(&ENEMY, ENEMY.wsec_i, 0, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off); else if (EN.state != E_DEAD && EN.type == 9) { for (uint32_t si = 0; si < ENEMY.nS; si++) if (ENEMY.sec[si].flag == 2) { fire_char_emit(&ENEMY, (int)si, 1, EN.p.x, EN.p.y, EN.p.z, EN.face + EN.yaw_off); break; } } CUR = &HUNT; }
+            da_draw(&ps1, pv, pl.x, pl.y);      // dream_amyg: the Amygdala on the Dream's roof
             TR("characters drawn");
             panels_draw(&ps1, pv);      // panels_last: drawn after the player and the enemies so the dimming covers them too (depth-tested, so anything in front of a panel stays bright)
             if (g_dark >= 0.01f || g_dream_day > 0.01f) { glDisableVertexAttribArray(0); glDisableVertexAttribArray(1); glUseProgram(0); dark_overlay(); g_dark_done = 1; glDisable(GL_BLEND); glEnable(GL_DEPTH_TEST); glUseProgram(ps1.prog); glEnableVertexAttribArray(0); glEnableVertexAttribArray(1); }      /* dark_lights: dim the world first, then draw flames and glows at full brightness */
@@ -17368,14 +19347,14 @@ int main(void) {
         }
         if (!g_dark_done) dark_overlay();
         g_dark_done = 0;
-        if (g_lowfb) lowres_present();      /* lowres_3d: everything above was the 3D scene; from here on it is the HUD at full resolution */
+        if (g_lowfb) { mb_apply(fade_st != 0); lowres_present(); }      /* motion_blur, then lowres_3d: everything above was the 3D scene; from here on it is the HUD at full resolution */
         if (hunter_ok && !flying) {
             float ehpf = -1.0f;
             int fi = lock_idx >= 0 ? lock_idx : last_hit; if (fi < 0 || fi >= NUM_ENEMIES) fi = 0;
             ECUR = &ENS[fi];
             if (en_ok && EN.type != 4 && (EN.state != E_IDLE || lock_idx >= 0) && !(EN.state == E_DEAD && EN.st > 3.0f)) ehpf = (EN.hp > 0.0f ? EN.hp : 0.0f) / EN.hp_max;
             g_boss_hpf = -1.0f; g_en_name = (en_ok && EN.hostile && !EN.ally) ? (EN.type == 19 ? "EILEEN THE CROW" : (EN.type == 20 ? "HENRYK" : "")) : "";
-            if (en_ok && BS.idx >= 0 && BS.idx < n_en && ENS[BS.idx].type == 4 && BS.fight && !(ENS[BS.idx].state == E_DEAD && ENS[BS.idx].st > 2.0f)) { g_boss_hpf = (ENS[BS.idx].hp > 0.0f ? ENS[BS.idx].hp : 0.0f) / ENS[BS.idx].hp_max; g_boss_name = gh_map() ? "GEHRMAN" : gb_map() ? "GILBERT" : (cb_map() ? "CLERIC BEAST" : "FATHER GASCOIGNE"); }
+            if (en_ok && BS.idx >= 0 && BS.idx < n_en && ENS[BS.idx].type == 4 && BS.fight && !(ENS[BS.idx].state == E_DEAD && ENS[BS.idx].st > 2.0f)) { g_boss_hpf = (ENS[BS.idx].hp > 0.0f ? ENS[BS.idx].hp : 0.0f) / ENS[BS.idx].hp_max; g_boss_name = gh_map() ? "GEHRMAN" : gb_map() ? "GILBERT" : (cb_map() ? (rom_map() ? (moon_map() ? "MOON PRESENCE" : (rl_map() ? "ROM, THE VACUOUS SPIDER" : "AMYGDALA")) : "CLERIC BEAST") : "FATHER GASCOIGNE"); }
             float lsx = -1.0f, lsy = -1.0f;
             if (locked) {                                   // project the enemy's chest to the screen
                 float viewM[16], pv[16];
@@ -17394,7 +19373,7 @@ int main(void) {
           GIF("before_swap");
           { static char am_[40]; if (strcmp(am_, cur_map)) { snprintf(am_, sizeof am_, "%s", cur_map); g_aim = 0; g_mono = 0; } if (dead_t >= 0.0f || flying || !hunter_ok) { g_aim = 0; g_mono = 0; } if (g_mono) crosshair_draw(); }      // free_aim
           crt_overlay(); splash_overlay();
-          TR("swap"); if (g_trace > 0) g_trace--; vglSwapBuffers(GL_FALSE);
+          TR("swap"); if (g_trace > 0) g_trace--; vglSwapBuffers(GL_FALSE); fps_limit();
           g_prof[3] += (double)(sceKernelGetProcessTimeWide() - t2_); g_prof_n++; }
     }
 

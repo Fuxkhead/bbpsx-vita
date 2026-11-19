@@ -34,9 +34,11 @@ WEAPONS = [
     ('cane',         'R', 'ThreadedCane/Mesh/SM_ThreadedCane.pskx',    {'MI_ThreadedCane': 'T_Cane'}),
     ('cane_t',       'R', 'ThreadedCane/Mesh/SkM_ThreadedCaneTrans.psk', {'MI_ThreadedCane': 'T_Cane'}),      # the cane's second form: shown instead of 'cane' once it has transformed (placeholder swap half way through ThreadedCane_Transform)
     ('tonitrus',     'R', 'Tonitrus/Mesh/SkM_Tonitrus.psk',            {'MI_Tonitrus': 't_tonitrus'}),
+    ('moonlight',    'R', 'Moonlight/Mesh/SkM_Moonlight.psk',          {'MI_MoonlightHilt': 't_moonlighthilt', 'MI_MoonlightBlade': 't_moonlightblade'}),      # the Holy Moonlight Sword (weapon id 15): skipped when its folder is not under --root (make_moonlight.sh copies it there)
+    ('moonlight_t',  'R', 'Moonlight/Mesh/SkM_Moonlight.psk',          {'MI_MoonlightHilt': 't_moonlighthilt', 'MI_MoonlightBlade': 't_moonlightblade'}),      # its second form (drawn instead once it is gripped in both hands): the same mesh with its 'BladeOut' shape applied, which grows the blade of light out of the steel
 ]
 
-XFORM = ('bloodspear', 'axe')      # weapons with a transform (Open/Close) animation set: their moving blade part is split off and animated at run time like the cleaver's
+XFORM = ('bloodspear', 'axe', 'burial')      # weapons with a transform (Open/Close) animation set: their moving blade part is split off and animated at run time like the cleaver's
 
 # weapons whose transform animations are not called Open/Close: .psa base name (lower case) -> role. A missing 'close' is made by playing 'open' backwards.
 XALIAS = {'axe': {'animaxe_2htransform': 'open', 'animaxe_idletrans': 'openidle', 'animaxe_idleuntrans': 'closedidle'}}
@@ -70,6 +72,7 @@ def main():
     ap.add_argument('--map', action='append'); ap.add_argument('--off', action='append'); ap.add_argument('--rot', action='append'); ap.add_argument('--size', action='append')
     ap.add_argument('--gunrot', default='-20,0,0', help='tilt of every held gun (pistol, blunderbuss, shotgun, flamesprayer) about the gun file axes, degrees rx,ry,rz: rx negative pitches the barrel up toward the thumb side (forward when the arm hangs), positive pitches it the other way; 0,0,0 = as before')
     ap.add_argument('--only', default=None)
+    ap.add_argument('--burial', action='store_true', help="adds Gehrman's Burial Blade as its own weapon (id 14) (assets/BP/PlayerWeapons/BurialBlade, built by make_scythe.py); the hand is slid 62 cm up the haft toward the blade (override with --off bloodspear=x,y,z)")
     ap.add_argument('--noauto', action='store_true', help='use the old fixed axes for the Blades of Mercy instead of working them out from the mesh')
     ap.add_argument('--grip', default='0.12', help='how far in from the handle end the hand holds an auto-oriented blade (fraction of its length)')
     ap.add_argument('--bladebones', default='transformer,transformer_end,damagestart,damageend,transspark', help='bones (lower case) of the weapon skeleton that belong to the moving blade part')
@@ -82,6 +85,9 @@ def main():
     for d_ in (maps, offs, rots, sizes):
         if 'cane' in d_ and 'cane_t' not in d_: d_['cane_t'] = d_['cane']                # both forms share the tuning
     only = set(x.strip() for x in a.only.split(',')) if a.only else None
+    if a.burial:      # the Burial Blade is its own weapon (id 14), next to the Blood Spear
+        WEAPONS.append(('burial', 'R', 'BurialBlade/Mesh/SkM_BurialBlade.psk', {'MI_BurialBlade': 't_burialblade'}))
+        offs.setdefault('burial', '9,-62,0'); rots.setdefault('burial', '90,0,90')      # the hand bones lie along the arm (+X points down): blade onto the hand's +Y, rolled so the edge faces down; the hand slid up the haft along that axis
 
     hm = ch.load_psk(a.hunter); bones = hm['bones']; names = [b['name'] for b in bones]
     bind = ch.world_chain(names, [b['parent'] for b in bones], [(b['q'], b['p']) for b in bones])
@@ -95,6 +101,23 @@ def main():
             if os.path.exists(alt): path = alt
             else: print(f"{name}: {rel} not found - skipped"); continue
         mm = ch.load_psk(path)
+        if name == 'moonlight_t':      # the blade of light lies folded flat inside the steel in the file; its morph target ('BladeOut') spreads it out. (The export stores the morph's Y the other way round from the points, like the other .psk morphs: flipped back here, so the blade grows longer, not shorter)
+            raw = open(path, 'rb').read(); o_ = 0; mp = None
+            while o_ + 32 <= len(raw):
+                cn = raw[o_:o_ + 20].split(b'\0')[0]; _f, csz, cnt = struct.unpack_from('<iii', raw, o_ + 20); o_ += 32
+                if cn == b'MRPHDATA': mp = [struct.unpack_from('<6fI', raw, o_ + i * csz) for i in range(cnt)]
+                o_ += csz * cnt
+            if mp:
+                pts_ = mm['pts'].astype(np.float32).copy(); k_ = float(os.environ.get('ML_MORPH', '1.0')); sy_ = float(os.environ.get('ML_MORPH_Y', '-1'))
+                r0_ = mm['pts'].astype(np.float32); dl_ = {int(pi): np.array([dx * k_, sy_ * dy * k_, dz * k_], np.float32) for dx, dy, dz, _nx, _ny, _nz, pi in mp}; tw_ = 0
+                for i_ in range(len(r0_)):      # blade_gap: the export leaves out the copies of a point (the mesh stores a corner once per face that meets there), so those copies stayed behind and tore a gap in the blade of light. Every point that sits exactly where a moved point sits moves with it
+                    if i_ in dl_: continue
+                    for j_ in list(dl_):
+                        if j_ < len(r0_) and float(np.abs(r0_[i_] - r0_[j_]).max()) < 0.05: dl_[i_] = dl_[j_]; tw_ += 1; break
+                for pi, dv in dl_.items(): pts_[pi] += dv
+                print(f"  moonlight_t: {tw_} copied points moved with their twins")
+                mm['pts'] = pts_; print(f"  moonlight_t: blade of light spread out ({len(mp)} points), now {np.ptp(pts_[:, 1]):.0f} cm long")
+            else: print('  moonlight_t: no BladeOut shape in the file - the second form looks like the first')
         pts = mm['pts'].astype(float) * float(sizes.get(name, 1.0))
         Mauto = None
         if name in AUTO and not a.noauto:
@@ -196,6 +219,7 @@ def main():
             allpsa = sorted(glob.glob(os.path.join(os.path.dirname(os.path.dirname(path)), 'Anim', '*.psa')))
             print(f"  {name}: transform .psa files used: {[os.path.basename(x) for x in wf]}  (all in its Anim folder: {[os.path.basename(x) for x in allpsa]})")
             xb = a.xbone.lower(); d0, d1 = [x.strip().lower() for x in a.damagebones.split(',')]
+            if name == 'burial': d0, d1 = 'transformer', 'transformer_end'      # the Burial Blade has no DamageStart / DamageEnd bones: its edge runs hinge -> tip, so the paper's fire / sparks and the hits sit on the blade, not the haft
             Mgi = np.linalg.inv(Mg); bw = ch.world_chain(bnames, [b['parent'] for b in mm['bones']], [(b['q'], b['p']) for b in mm['bones']])
             bwl = {k.lower(): v for k, v in bw.items()}; anl = []
             for fp in wf:

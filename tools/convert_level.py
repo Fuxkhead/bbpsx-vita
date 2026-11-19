@@ -41,8 +41,8 @@ SEC_MAT = {"SM_HouseSmall": {      # house_sections: SM_HouseSmall ships 15 sect
     "Section_4": "MI_ArchAlt", "Section_5": "MI_RailTrim", "Section_6": "MI_RailTrim", "Section_7": "MI_RailTrim", "Section_8": "MI_RailTrim",
     "Section_9": "MI_Roof", "Section_10": "MI_RailTrim", "Section_11": "MI_ArchAlt", "Section_12": "MI_Stone", "Section_13": "MI_RailTrim", "Section_14": "MI_Stone"}}
 MESH_MAT_DEFAULT = {"SM_Shelf2": "Env/HuntersDream/Mat/MI_Shelf2.usda"}      # mesh name -> material (relative to --assets) for meshes exported without one
-NOCOLLIDE_DEFAULT = ["Chain", "Rope", "Card", "Light", "DeadBody", "Tarp"]   # decorations: no collision (spheres/bags ARE solid: they are the canal boulders)
-NOCOLLIDE_TEX = ["water", "groundfog_gen"]                  # parts whose texture name contains these: no collision
+NOCOLLIDE_DEFAULT = ["Chain", "Rope", "Card", "Light", "DeadBody"]   # decorations: no collision (spheres/bags ARE solid: they are the canal boulders)
+NOCOLLIDE_TEX = ["water", "groundfog_gen", "archwell"]      # archwell: the see-through arch pictures over the arenas' entrances are not solid                  # parts whose texture name contains these: no collision
 
 # ---------------------------------------------------------------- USDA prim tree
 class Prim:
@@ -51,9 +51,6 @@ class Prim:
         self.refs, self.children = [], []
         self.t, self.q, self.s = (0, 0, 0), (1, 0, 0, 0), (1, 1, 1)
         self.binding = None
-
-BOSS_ONLY_MESHES = ("tomb", "grave", "headstone")      # the player can never break these; only the beast Gascoigne charges through them (kind 1 in the file)
-UNBREAKABLE_MESHES = ("carriage", "cart", "wagon", "wheel", "coach")      # meshes under a destructible blueprint that must stay solid (lower-case parts of the mesh name). Add more here if something else breaks that should not
 
 def nums(s):
     return [float(x) for x in re.findall(r'[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?', s)]
@@ -374,7 +371,6 @@ def main():
         eil = eil or (p.kind == "Scope" and ("EileenTheCrow" in p.name or "HenrykNPC" in p.name or p.name.startswith("BP_Doll") or p.name.startswith("BP_NoteMessenger") or p.name.startswith("BP_MessengerWeapGrant")))      # eileen_npc: everything under her placement scope
         if p.kind == "Scope" and (p.name.startswith("BP_Doors") or p.name.startswith("BP_DoorBig") or p.name.startswith("SM_DoorframeSingle")): grp = ("door", p.name)
         elif p.kind == "Scope" and p.name.startswith("BP_Ladder"): grp = ("ladder", p.name)
-        elif p.kind == "Scope" and (p.name.startswith("BPC_Dest_") or p.name.startswith("BP_Destruct")) and not (grp and grp[0] == "dest"): grp = ("dest", p.name)      # breakables: a destructible blueprint (BPC_Dest_Barrel, BPC_Dest_BarrelStack ...): everything under it breaks together
         if p.kind in ("Xform", "Mesh", "Scope"):
             if p.kind == "Scope" and not p.refs:
                 local = ([[1,0,0],[0,1,0],[0,0,1]], [0, 0, 0])
@@ -584,7 +580,7 @@ def main():
         col_start = len(col)
         if 'SM_Wheelchair' in drawable_mesh[d] and 'Gehr' not in drawable_mesh[d] and _chair_bound(ii): continue
         if 'SM_GilbTable' in drawable_mesh[d]: continue      # gilbert_table: his bed is movable (the game moves it with him), so no baked collision
-        if any(x in drawable_mesh[d] for x in nocol) and ('Chain' in drawable_mesh[d] or 'Tarp' in drawable_mesh[d] or not any(t != 0xFFFF and tex_names[t].lower().startswith('t_gate1') for g, t in drawables[d])):      # chains use the iron gate texture, but they hang loose from the roof and must never block you      # iron gates stay solid even when their mesh name says Light
+        if any(x in drawable_mesh[d] for x in nocol) and not any(t != 0xFFFF and tex_names[t].lower().startswith('t_gate1') for g, t in drawables[d]):      # iron gates stay solid even when their mesh name says Light
             continue
         for g, t in drawables[d]:
             if t != 0xFFFF and any(w in tex_names[t].lower() for w in NOCOLLIDE_TEX):
@@ -1006,42 +1002,20 @@ def main():
         spawn = (0.0, 0.0, 2.0)
 
     # ---- write
-    # breakables: everything the map places under a destructible blueprint (BPC_Dest_*: barrels, barrel stacks ...) goes into breakables_<map>.txt, one instance per line:
-    #   instance  first-collision-triangle  collision-triangle-count  centre-x  centre-y  bottom-z  half-width-x  half-width-y  height  group     (metres; instances with the same group break together)
-    # the game hides the instances and removes their collision when a swing, a roll, a shot or a fire hits one of them
-    _mp = os.path.basename(os.path.expanduser(args.out)).lower()      # the map this file is for, e.g. level_gascoignearena.bin
-    _gasmap = "gascoignearena" in _mp
-    _cbmap = "clericbeast" in _mp      # the Cleric Beast's arena: its carriages stay solid for you but the beast smashes them (kind 1)
-    # kind 1 = boss only. In Gascoigne's arena everything that is not a barrel / crate / box counts, because the tombstone's mesh name is not known for sure
-    _kind = lambda nm: 1 if (any(k_ in nm.split()[-1].lower() for k_ in BOSS_ONLY_MESHES) or (_cbmap and any(k_ in nm.split()[-1].lower() for k_ in UNBREAKABLE_MESHES)) or (_gasmap and not any(k_ in nm.split()[-1].lower() for k_ in ("barrel", "crate", "box")))) else 0
-    _dest = {}; _skipped = {}
-    for ii, (grp_, nm_) in enumerate(inst_info):
-        if grp_ and grp_[0] == "dest":
-            if _cbmap or not any(k_ in nm_.split()[-1].lower() for k_ in UNBREAKABLE_MESHES): _dest.setdefault(grp_[1], []).append(ii)      # everything under a destructible blueprint except the unbreakable list
-            else: _skipped[nm_.split()[-1]] = _skipped.get(nm_.split()[-1], 0) + 1
+    # breakables: every barrel the map places (the game's BPC_Dest_Barrel / BPC_Dest_BarrelStack blueprints, mesh SM_Barrel) goes into breakables_<map>.txt, one per line:
+    #   instance  first-collision-triangle  collision-triangle-count  centre-x  centre-y  bottom-z  half-width-x  half-width-y  height     (metres)
+    # the game hides the instance and removes its collision when a swing, a roll, a shot or a fire hits it
     _bk = []
-    if _skipped: print("  under a destructible blueprint but NOT made breakable: " + ", ".join(f"{k} x{v}" for k, v in sorted(_skipped.items())))
-    if _dest:
-        print(f"  destructible blueprints in this map: {len(_dest)}")
-        for _gi, (_gn, _mem) in enumerate(sorted(_dest.items())):
-            print(f"    {_gn}: " + ", ".join(sorted(set(inst_info[m][1].split()[-1] for m in _mem))) + f" (x{len(_mem)})")
-            for ii in _mem:
-                _V = inst_verts(ii); _lo = _V.min(0); _hi = _V.max(0); _cs, _cc = inst_col.get(ii, (0, 0))
-                _bk.append((ii, _cs, _cc, (_lo[0] + _hi[0]) / 2, (_lo[1] + _hi[1]) / 2, _lo[2], (_hi[0] - _lo[0]) / 2, (_hi[1] - _lo[1]) / 2, _hi[2] - _lo[2], _gi, _kind(inst_info[ii][1])))
-        _loose = [ii for ii, (g_, n_) in enumerate(inst_info) if not (g_ and g_[0] == "dest") and n_.split()[-1] == 'SM_Barrel']
-        if _loose: print(f"  note: {len(_loose)} SM_Barrel instances are NOT under a destructible blueprint (left unbreakable)")
-    else:      # the map has no BPC_Dest_ scopes (or they are named differently): every SM_Barrel counts, one by one
-        for ii, (grp_, nm_) in enumerate(inst_info):
-            if nm_.split()[-1] != 'SM_Barrel': continue
-            _V = inst_verts(ii); _lo = _V.min(0); _hi = _V.max(0); _cs, _cc = inst_col.get(ii, (0, 0))
-            _bk.append((ii, _cs, _cc, (_lo[0] + _hi[0]) / 2, (_lo[1] + _hi[1]) / 2, _lo[2], (_hi[0] - _lo[0]) / 2, (_hi[1] - _lo[1]) / 2, _hi[2] - _lo[2], -1, 0))
-        if _bk: print("  note: no BPC_Dest_ blueprint found in this map: every SM_Barrel was made breakable instead")
+    for ii, (grp_, nm_) in enumerate(inst_info):
+        if nm_.split()[-1] != 'SM_Barrel' and 'Dest_Barrel' not in nm_: continue
+        _V = inst_verts(ii); _lo = _V.min(0); _hi = _V.max(0); _cs, _cc = inst_col.get(ii, (0, 0))
+        _bk.append((ii, _cs, _cc, (_lo[0] + _hi[0]) / 2, (_lo[1] + _hi[1]) / 2, _lo[2], (_hi[0] - _lo[0]) / 2, (_hi[1] - _lo[1]) / 2, _hi[2] - _lo[2]))
     _bn = os.path.basename(os.path.expanduser(args.out)); _bn = "breakables_" + (_bn[len("level_"):-4] if _bn.startswith("level_") and _bn.endswith(".bin") else _bn) + ".txt"
     _bp = os.path.join(os.path.dirname(os.path.expanduser(args.out)) or ".", _bn)
     if _bk:
         with open(_bp, "w") as _bf:
-            for _r in _bk: _bf.write("%d %d %d %.3f %.3f %.3f %.3f %.3f %.3f %d %d\n" % _r)
-        print(f"  breakables: {len(_bk)} pieces -> {_bn}")
+            for _r in _bk: _bf.write("%d %d %d %.3f %.3f %.3f %.3f %.3f %.3f\n" % _r)
+        print(f"  breakables: {len(_bk)} barrels -> {_bn}")
     elif os.path.exists(_bp):
         os.remove(_bp)
     out = os.path.expanduser(args.out)

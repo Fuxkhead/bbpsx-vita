@@ -1,6 +1,6 @@
 #!/bin/bash
 # builds henryk.bin: Henryk (his outfit on the Hunter skeleton, the Hunter's idle / walk and now the fighting moves + the saw cleaver) from ~/bbpsx-vita/assets
-# tune the cleaver in his hand like Eileen's:  EROT=0,0,90 EOFF=0,0,0 bash make_henryk.sh
+# the cleaver is held exactly like the player's (same mount as hunter.bin) and transforms in his swings; NOXFORM=1 leaves out the transform animations
 cd ~/bbpsx-vita || exit 1
 PSK=$(find assets -name "SkM_AttireHenryk.psk" | head -1)
 F=$(grep -rl "Hunter_Idle" assets --include=*.psa 2>/dev/null | head -1)      # the animation file that holds Hunter_Idle
@@ -35,12 +35,15 @@ echo "head meshes: ${HEADS:-NONE FOUND}"
 TM="${HTM:+$HTM,}MI_HenrykBody=t_henrykbody,MI_HenrykBodyDark=t_henrykbody,MI_HenrykBodyPrev=t_henrykbody,MI_HunterHead=T_HunterHead,MI_HunterHeadPrev=T_HunterHead,MI_Bandage=t_hair,MI_ForeignBody=t_henrykbody,MI_HunterHair=t_hair,MI_HunterFace=T_HunterHead"
 BLADE=$(find assets/BP/PlayerWeapons -iname '*Cleaver*' \( -name '*.psk' -o -name '*.pskx' \) 2>/dev/null | head -1)      # his weapon: the saw cleaver. NOCLEAVER=1 builds him without it
 [ -n "$NOCLEAVER" ] && BLADE=""
+# the cleaver is mounted exactly like the player's (convert_hunter.py --weapon: the same hand axes and offset as hunter.bin), and carries its own Open / Close animations so it can transform in his swings
+WANIM=""; [ -n "$BLADE" ] && [ -z "$NOXFORM" ] && for d in $(find assets/BP/PlayerWeapons/Cleaver -type d -iname 'Anim*' 2>/dev/null | head -1); do WANIM="$d"; done
+echo "cleaver animations: ${WANIM:-none (it will not transform)}"
 PSAS="$PSA $(find assets/Char/Hunter/Anim assets/BP/PlayerWeapons -type d 2>/dev/null | tr '\n' ' ')"      # he fights with the Hunter's own moves now (the Eileen duel), so pack them too
 echo "cleaver: ${BLADE:-none}"
 TEXD="assets/Cine assets/Char/Hunter ${BLADE:+$(dirname "$(dirname "$BLADE")")}"
 python3 assets/tools/convert_hunter.py --psk "$PSK" $HEADS --psa $PSAS --psaonly Hunter_Idle,Hunter_Walk,Hunter_Run,HunterDeath,HunterCleav_Attack,Small,Quickstep,HunterDodge_Roll \
   --tex $TEXD --texmap "$TM,MI_Cleaver=t_sawcleaver" --tint none ${HAT:+--hat "$HAT"} \
-  ${BLADE:+--pistol "$BLADE" --pistolbone hand_r --pistolrot ${EROT:-0,0,0} ${EOFF:+--pistoloff $EOFF}} \
+  ${BLADE:+--weapon "$BLADE"} ${WANIM:+--weaponanim $WANIM} \
   --fps 15 --out henryk.bin 2>&1 | grep -E "WARNING|^wrote|bones missing|Error|Traceback|material" | head -20
 ls -l henryk.bin
 echo "Copy henryk.bin to ux0:data/bbpsx/"

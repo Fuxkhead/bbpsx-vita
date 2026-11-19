@@ -337,6 +337,8 @@ def main():
                             v = verts[int(x)].copy(); v['b'][3] = 1; extra.append(v); ids.append(nW + len(extra) - 1 + vbase)
                         i0, i1, i2 = ids
                     else:
+                        if blade_pt is not None:
+                            for x in f['w']: verts['b'][int(x)][3] = 2      # still part of the weapon (the haft): flag 2, so the game can slide / turn / raise it
                         i0, i1, i2 = (int(x) + vbase for x in f['w'])
                     idx += [i0, i2, i1]                      # reflection flips the winding
                 sections.append((start, len(idx) - start, mat_names.index(mname), (3 if mm.get('pistol2') else (2 if mm.get('pistol') else (10 + mm['mhat'] if 'mhat' in mm else (5 + mm['mweap'] if 'mweap' in mm else 0))))))

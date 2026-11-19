@@ -9,7 +9,10 @@ CAMPSK=$(find $A -iname "SkM_CutsceneCameraRig.psk" | head -1)
 WHEEL=$(find $A -ipath "*Clinic*" -iname "SM_Wheelchair.pskx" | head -1)
 [ -n "$PSK" ] && [ -n "$CAMPSK" ] && [ -n "$WHEEL" ] || { echo "missing: granter ${PSK:-NO} / camera rig ${CAMPSK:-NO} / wheelchair ${WHEEL:-NO}"; exit 1; }
 TEXD="$G/Mat $A/Char/Hunter/Mat/Tex"
-for t in BbPSX_Head128v3Old t_hair t_carriage; do d=$(find $A -iname "$t.png" | head -1 | xargs -r dirname); [ -n "$d" ] && TEXD="$TEXD $d"; done
+for t in BbPSX_Head128v3Old t_hair t_carriage t_contractgiver t_contractgiver_alt; do d=$(find $A -iname "$t.png" | head -1 | xargs -r dirname); [ -n "$d" ] && TEXD="$TEXD $d"; done
+# the body texture t_contractgiver has to be found, or the Granter is drawn plain grey: look for it anywhere under assets (any case, png or tga) and add its folder
+for f in $(find $A -iname "*contractgiver*" \( -iname "*.png" -o -iname "*.tga" \) | head -6); do TEXD="$TEXD $(dirname "$f")"; done
+if [ -z "$(find $A -iname "t_contractgiver*.png" -o -iname "t_contractgiver*.tga" | head -1)" ]; then echo "WARNING: no t_contractgiver texture under $A - the Granter will come out GREY. Export it from the game files (T_ContractGiver / t_contractgiver) as PNG into $G/Mat and run this again."; fi
 FACE=BbPSX_Head128v3Old; [ -n "$(find $A -iname "$FACE.png" | head -1)" ] || FACE=BbPSX_Head128v3OldMouthOpen
 # SKIN="R,G,B" sets the Contract Granter's skin colour (default 210,184,164): SKIN=190,160,140 bash make_intro.sh
 echo "granter: $PSK   face texture: $FACE"

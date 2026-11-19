@@ -7,7 +7,7 @@ endif()
 project(bbpsx_hello C)
 include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 
-set(VITA_APP_NAME "bloodbornePSX-V")
+set(VITA_APP_NAME "bloodbornePSX V")
 set(VITA_TITLEID  "BBPS00001")
 set(VITA_VERSION  "01.09")
 
