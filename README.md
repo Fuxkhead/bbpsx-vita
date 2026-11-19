@@ -1,6 +1,8 @@
 # Bloodborne PSX for PS Vita: build kit
 
-This kit builds the Vita port of Bloodborne PSX **from your own copy of the game's files**. It contains source code, converter scripts and
+This kit builds the Vita port of Bloodborne PSX **from your own copy of the game's files** found here https://github.com/SonyEntertainmentNetwork/BBPSX-Decompilation
+you also need files extracted out of nightmare kart, and files from your legal copy of bloodborne if you want a better experience.
+It contains source code, converter scripts and
 hand-written settings only: **no Bloodborne PSX art, models, maps, music or voices are included**. The data you build from them is derived
 from the game's files, so keep it for your own use unless you have permission to share it.
 
